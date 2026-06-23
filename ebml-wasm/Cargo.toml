@@ -1,0 +1,18 @@
+[package]
+name = "ebml-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+cache-rs = "=0.4.0"
+gloo-net = "0.7.0"
+# web-sys = { version = "0.3.99", features = ["console"] }
+ebml-spec = { path = "../ebml-spec" }
+lru = "0.18.0"
+wasm-bindgen = "0.2.122"
+wasm-bindgen-futures = "0.4.72"
+muxide = "0.2.5"

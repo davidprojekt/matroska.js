@@ -1,0 +1,15 @@
+[package]
+name = "ebml-spec"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+quick-xml = "0.40.1"
+instant-xml = "0.7.3"

@@ -1,0 +1,14 @@
+{
+  "name": "cherryplayer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "simple-http-server -i --cors --port 8501",
+    "dev": "wasm-pack build --target web && cp -r ./pkg ../matroska-web/"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "AGPL-3.0-only",
+  "dependencies": {}
+}

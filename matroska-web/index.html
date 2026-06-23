@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>matroska-web · local hex viewer</title>
+    <style>
+        :root {
+            --bg: #0e1014;
+            --bg-elev: #161a21;
+            --bg-elev-2: #1d222b;
+            --border: #2a313d;
+            --text: #d7dde6;
+            --text-dim: #8b95a5;
+            --accent: #6cb6ff;
+            --accent-soft: #1f3146;
+            --green: #7ee787;
+            --amber: #e3b341;
+            --purple: #c099ff;
+            --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+            --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 14px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ---------- header ---------- */
+        header {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 18px;
+            background: var(--bg-elev);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .brand {
+            font-family: var(--mono);
+            font-weight: 600;
+            letter-spacing: .04em;
+            white-space: nowrap;
+        }
+        .brand .dot { color: var(--accent); }
+        .brand .sub { color: var(--text-dim); font-weight: 400; }
+
+        #drop {
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px 16px;
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: border-color .15s, background .15s, color .15s;
+            min-width: 0;
+        }
+        #drop:hover { border-color: var(--accent); color: var(--text); }
+        #drop.drag { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+        #drop .fname { color: var(--text); font-family: var(--mono); }
+        #drop b { color: var(--accent); }
+
+        /* ---------- metadata strip ---------- */
+        #summary {
+            flex: 0 0 auto;
+            display: none;
+            gap: 14px;
+            padding: 14px 18px;
+            background: var(--bg-elev);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+            align-items: stretch;
+        }
+        #summary.show { display: flex; }
+
+        .card {
+            background: var(--bg-elev-2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            min-width: 120px;
+        }
+        .card .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: var(--text-dim);
+            margin-bottom: 5px;
+        }
+        .card .value {
+            font-family: var(--mono);
+            font-size: 16px;
+            color: var(--text);
+            white-space: nowrap;
+        }
+        .card.title-card { min-width: 160px; }
+        .card.title-card .value { font-size: 14px; }
+
+        .streams-card {
+            flex: 1 1 auto;
+            min-width: 260px;
+        }
+        .stream-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+            font-family: var(--mono);
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .badge {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .05em;
+            font-family: var(--sans);
+            font-weight: 600;
+        }
+        .badge.video { background: #15324a; color: var(--accent); }
+        .badge.audio { background: #14331f; color: var(--green); }
+        .badge.subtitle { background: #3a2a14; color: var(--amber); }
+        .badge.other { background: #2c2440; color: var(--purple); }
+        .stream-row .lang { color: var(--amber); }
+        .stream-row .codec { color: var(--text-dim); }
+        .stream-row .extra { color: var(--text-dim); }
+
+        /* ---------- main split ---------- */
+        main {
+            flex: 1 1 auto;
+            display: flex;
+            min-height: 0;
+        }
+
+        #tree-pane {
+            flex: 0 0 42%;
+            max-width: 620px;
+            min-width: 280px;
+            overflow: auto;
+            border-right: 1px solid var(--border);
+            padding: 10px 0;
+        }
+        #hex-pane {
+            flex: 1 1 auto;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        /* ---------- tree ---------- */
+        ul.tree { list-style: none; margin: 0; padding: 0; }
+        ul.tree ul { list-style: none; margin: 0; padding-left: 18px; }
+
+        .node {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 3px 10px 3px 12px;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            cursor: pointer;
+            border-left: 2px solid transparent;
+            white-space: nowrap;
+        }
+        .node:hover { background: var(--bg-elev); }
+        .node.selected {
+            background: var(--accent-soft);
+            border-left-color: var(--accent);
+        }
+        .twisty {
+            display: inline-block;
+            width: 12px;
+            color: var(--text-dim);
+            transition: transform .12s;
+            flex: 0 0 auto;
+        }
+        .twisty.open { transform: rotate(90deg); }
+        .twisty.leaf { visibility: hidden; }
+        .node .id { color: var(--purple); }
+        .node .ptype { color: var(--text-dim); }
+        .node .name { color: var(--accent); }
+        .node .size { color: var(--text-dim); margin-left: auto; padding-left: 14px; font-size: 11px; }
+        .node .val { color: var(--green); }
+
+        .loadmore {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--accent);
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 3px 12px 3px 30px;
+            text-align: left;
+            display: block;
+        }
+        .loadmore:hover { text-decoration: underline; }
+
+        /* ---------- hex ---------- */
+        .hex-head {
+            flex: 0 0 auto;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elev);
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+        .hex-head .sel-id { color: var(--purple); }
+        .hex-head .sel-type { color: var(--text); }
+        .hex-head .note { color: var(--amber); }
+
+        #hex {
+            flex: 1 1 auto;
+            overflow: auto;
+            padding: 12px 16px;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            line-height: 1.5;
+        }
+        .hex-empty {
+            color: var(--text-dim);
+            font-family: var(--mono);
+            padding: 40px 16px;
+            text-align: center;
+        }
+        .hline { white-space: pre; }
+        .hline .off { color: var(--text-dim); }
+        .hline .hx { color: var(--text); }
+        .hline .hx .z { color: #4a525f; }
+        .hline .as { color: var(--green); }
+        .hline .as .np { color: #4a525f; }
+
+        .placeholder {
+            margin: auto;
+            text-align: center;
+            color: var(--text-dim);
+            padding: 60px 20px;
+        }
+        .placeholder h2 { color: var(--text); font-weight: 600; }
+        .placeholder code {
+            background: var(--bg-elev-2);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-family: var(--mono);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">matroska<span class="dot">·</span>web <span class="sub">hex viewer</span></div>
+        <label id="drop">
+            <span class="prompt">Drop a video file here, or <b>browse</b> &mdash; nothing is uploaded</span>
+            <input id="file" type="file" accept="video/*,.mkv,.webm,.mka,.mks" hidden />
+        </label>
+    </header>
+
+    <section id="summary"></section>
+
+    <main>
+        <div id="tree-pane">
+            <div class="placeholder" id="tree-placeholder">
+                <h2>No file loaded</h2>
+                <p>Select a local <code>.mkv</code> / <code>.webm</code> file to parse it<br>
+                entirely in your browser via the WebAssembly EBML reader.</p>
+            </div>
+            <ul class="tree" id="tree" hidden></ul>
+        </div>
+        <div id="hex-pane">
+            <div class="hex-head" id="hex-head">Hex inspector</div>
+            <div id="hex"><div class="hex-empty">&lsaquo; select an element to inspect its bytes &rsaquo;</div></div>
+        </div>
+    </main>
+
+    <script type="module">
+        import init, { EbmlReader, FetchSourceEbml } from "./pkg/ebml_wasm.js";
+
+        // ---- Matroska element IDs (hex strings, lower-case, no 0x) ----
+        const ID = {
+            EBML: '1a45dfa3',
+            Segment: '18538067',
+            Info: '1549a966',
+            Title: '7ba9',
+            Duration: '4489',
+            TimestampScale: '2ad7b1',
+            MuxingApp: '4d80',
+            WritingApp: '5741',
+            Tracks: '1654ae6b',
+            TrackEntry: 'ae',
+            TrackType: '83',
+            TrackName: '536e',
+            Language: '22b59c',
+            LanguageBCP47: '22b59d',
+            CodecID: '86',
+            Video: 'e0',
+            PixelWidth: 'b0',
+            PixelHeight: 'ba',
+            DisplayWidth: '54b0',
+            DisplayHeight: '54ba',
+            Audio: 'e1',
+            SamplingFrequency: 'b5',
+            Channels: '9f',
+            Cluster: '1f43b675',
+        };
+
+        const TRACK_TYPE = { 1: 'video', 2: 'audio', 3: 'complex', 16: 'logo', 17: 'subtitle', 18: 'button', 32: 'control', 33: 'metadata' };
+
+        const HEX_CAP = 4096; // max bytes rendered in the hex pane per element
+        const BATCH = 25;     // children loaded per "load more" click
+
+        const $ = (sel) => document.querySelector(sel);
+        const idHex = (el) => el.get_id().toString(16).toLowerCase();
+        const id0x = (el) => '0x' + el.get_id().toString(16).toUpperCase();
+
+        let wasmReady = init();
+        let currentFile = null;     // the selected File (for hex slicing)
+        let selectedNode = null;
+
+        // ---------- file intake ----------
+        const drop = $('#drop');
+        const fileInput = $('#file');
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
+        });
+        ['dragenter', 'dragover'].forEach(ev =>
+            drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
+        ['dragleave', 'drop'].forEach(ev =>
+            drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
+        drop.addEventListener('drop', (e) => {
+            const f = e.dataTransfer?.files?.[0];
+            if (f) loadFile(f);
+        });
+
+        async function loadFile(file) {
+            currentFile = file;
+            drop.querySelector('.prompt').innerHTML =
+                `<span class="fname">${escapeHtml(file.name)}</span> &mdash; ${fmtBytes(file.size)}`;
+
+            // reset UI
+            $('#tree-placeholder').hidden = true;
+            const tree = $('#tree');
+            tree.hidden = false;
+            tree.innerHTML = '<li class="node"><span class="twisty leaf"></span><span class="ptype">parsing…</span></li>';
+            $('#summary').classList.remove('show');
+            $('#summary').innerHTML = '';
+            resetHex();
+
+            await wasmReady;
+
+            // push the LOCAL file into the library via a blob URL (Range-served by the browser)
+            const blobUrl = URL.createObjectURL(file);
+
+            // The wasm reader is a forward-only stream: get_payload() drains its element. So use
+            // ONE reader for the interactive tree (kept un-consumed until the user expands nodes)
+            // and a SEPARATE reader for the up-front metadata scan.
+            const treeReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(blobUrl));
+            const headDoc = await treeReader.next();   // EBML header
+            const bodyDoc = await treeReader.next();   // Segment
+
+            tree.innerHTML = '';
+            for (const el of [headDoc, bodyDoc].filter(Boolean)) renderNode(el, tree);
+
+            // metadata scan walks its own reader up to the first Cluster
+            try {
+                const metaReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(blobUrl));
+                await metaReader.next();                       // EBML header
+                const metaSegment = await metaReader.next();   // Segment
+                await scanMetadata(metaSegment);
+            } catch (err) {
+                console.warn('metadata scan failed', err);
+            }
+        }
+
+        // ---------- metadata ----------
+        async function scanMetadata(segmentDoc) {
+            if (!segmentDoc) return;
+            const segment = segmentDoc.get_payload();
+            if (!segment || typeof segment.next !== 'function') return;
+
+            const meta = { title: null, duration: null, scale: 1000000, tracks: [] };
+
+            let el;
+            while ((el = await segment.next())) {
+                const id = idHex(el);
+                if (id === ID.Info) {
+                    const info = el.get_payload();
+                    let f;
+                    while ((f = await info.next())) {
+                        const fid = idHex(f);
+                        if (fid === ID.Title) meta.title = f.get_payload();
+                        else if (fid === ID.Duration) meta.duration = await readBEFloat(f);
+                        else if (fid === ID.TimestampScale) meta.scale = Number(f.get_payload());
+                    }
+                } else if (id === ID.Tracks) {
+                    const tracks = el.get_payload();
+                    let entry;
+                    while ((entry = await tracks.next())) {
+                        if (idHex(entry) !== ID.TrackEntry) continue;
+                        meta.tracks.push(await readTrackEntry(entry.get_payload()));
+                    }
+                } else if (id === ID.Cluster) {
+                    break; // media data begins; stop the cheap scan
+                }
+            }
+            renderSummary(meta);
+        }
+
+        async function readTrackEntry(entry) {
+            const t = { type: 'other', codec: null, name: null, lang: null, w: null, h: null, channels: null };
+            let d;
+            while ((d = await entry.next())) {
+                const id = idHex(d);
+                if (id === ID.TrackType) t.type = TRACK_TYPE[Number(d.get_payload())] || 'other';
+                else if (id === ID.CodecID) t.codec = d.get_payload();
+                else if (id === ID.TrackName) t.name = d.get_payload();
+                else if (id === ID.Language) t.lang = t.lang || d.get_payload();
+                else if (id === ID.LanguageBCP47) t.lang = d.get_payload();
+                else if (id === ID.Video) {
+                    const v = d.get_payload();
+                    let vf;
+                    while ((vf = await v.next())) {
+                        const vid = idHex(vf);
+                        if (vid === ID.PixelWidth) t.w = t.w || Number(vf.get_payload());
+                        else if (vid === ID.PixelHeight) t.h = t.h || Number(vf.get_payload());
+                        else if (vid === ID.DisplayWidth) t.w = Number(vf.get_payload());
+                        else if (vid === ID.DisplayHeight) t.h = Number(vf.get_payload());
+                    }
+                } else if (id === ID.Audio) {
+                    const a = d.get_payload();
+                    let af;
+                    while ((af = await a.next())) {
+                        if (idHex(af) === ID.Channels) t.channels = Number(af.get_payload());
+                    }
+                }
+            }
+            return t;
+        }
+
+        function renderSummary(meta) {
+            const sum = $('#summary');
+            const cards = [];
+
+            cards.push(card('Title', escapeHtml(meta.title || '—'), 'title-card'));
+
+            const seconds = meta.duration != null ? meta.duration * meta.scale / 1e9 : null;
+            cards.push(card('Duration', seconds != null ? fmtDuration(seconds) : '—'));
+
+            const video = meta.tracks.find(t => t.type === 'video' && t.w && t.h);
+            cards.push(card('Resolution', video ? `${video.w}×${video.h}` : '—'));
+
+            const counts = meta.tracks.reduce((m, t) => (m[t.type] = (m[t.type] || 0) + 1, m), {});
+            const countStr = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(' · ') || '—';
+            cards.push(card('Streams', countStr));
+
+            // streams list card
+            let rows = meta.tracks.map(t => {
+                const extras = [];
+                if (t.w && t.h) extras.push(`${t.w}×${t.h}`);
+                if (t.channels) extras.push(`${t.channels}ch`);
+                return `<div class="stream-row">
+                    <span class="badge ${t.type}">${t.type}</span>
+                    <span class="codec">${escapeHtml(t.codec || '?')}</span>
+                    ${t.lang ? `<span class="lang">[${escapeHtml(t.lang)}]</span>` : ''}
+                    ${t.name ? `<span>${escapeHtml(t.name)}</span>` : ''}
+                    ${extras.length ? `<span class="extra">${extras.join(' ')}</span>` : ''}
+                </div>`;
+            }).join('');
+            if (!rows) rows = '<div class="stream-row codec">no track info</div>';
+            cards.push(`<div class="card streams-card"><div class="label">Tracks &amp; languages</div>${rows}</div>`);
+
+            sum.innerHTML = cards.join('');
+            sum.classList.add('show');
+        }
+
+        function card(label, value, cls = '') {
+            return `<div class="card ${cls}"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+        }
+
+        // ---------- structure tree ----------
+        function renderNode(el, container) {
+            const li = document.createElement('li');
+            const isMaster = el.get_payload_type() === 'Master';
+
+            const off = el.get_offset();
+            const size = el.get_size();
+            const known = knownName(el);
+
+            const node = document.createElement('div');
+            node.className = 'node';
+            node.innerHTML =
+                `<span class="twisty${isMaster ? '' : ' leaf'}">▶</span>` +
+                `<span class="id">${id0x(el)}</span>` +
+                (known ? `<span class="name">${known}</span>` : '') +
+                `<span class="ptype">${el.get_payload_type()}</span>` +
+                inlineValue(el) +
+                `<span class="size">@${off} · ${fmtElemSize(Number(size))}</span>`;
+            const twisty = node.querySelector('.twisty');
+
+            li.appendChild(node);
+            container.appendChild(li);
+
+            // selection -> hex
+            node.addEventListener('click', (e) => {
+                if (e.target === twisty) return;
+                selectNode(node, el);
+            });
+
+            if (isMaster) {
+                const childUl = document.createElement('ul');
+                childUl.hidden = true;
+                li.appendChild(childUl);
+
+                let cursor = null;
+                let exhausted = false;
+                let loadMoreBtn = null;
+
+                async function loadBatch() {
+                    if (!cursor) cursor = el.get_payload();
+                    for (let i = 0; i < BATCH; i++) {
+                        const child = await cursor.next();
+                        if (!child) { exhausted = true; break; }
+                        renderNode(child, childUl);
+                    }
+                    if (loadMoreBtn) {
+                        if (exhausted) loadMoreBtn.remove();
+                        else childUl.appendChild(loadMoreBtn); // keep it last
+                    } else if (!exhausted) {
+                        loadMoreBtn = document.createElement('button');
+                        loadMoreBtn.className = 'loadmore';
+                        loadMoreBtn.textContent = 'load more…';
+                        loadMoreBtn.addEventListener('click', (ev) => { ev.stopPropagation(); loadBatch(); });
+                        childUl.appendChild(loadMoreBtn);
+                    }
+                }
+
+                let loadedOnce = false;
+                twisty.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const open = childUl.hidden;
+                    childUl.hidden = !open;
+                    twisty.classList.toggle('open', open);
+                    if (open && !loadedOnce) { loadedOnce = true; await loadBatch(); }
+                });
+            }
+        }
+
+        function knownName(el) {
+            const id = idHex(el).toUpperCase();
+            const names = {
+                // EBML Header Elements (RFC 8794 — not in the Matroska schema)
+                '1A45DFA3': 'EBML',
+                '4286': 'EBMLVersion',
+                '42F7': 'EBMLReadVersion',
+                '42F2': 'EBMLMaxIDLength',
+                '42F3': 'EBMLMaxSizeLength',
+                '4282': 'DocType',
+                '4287': 'DocTypeVersion',
+                '4285': 'DocTypeReadVersion',
+                '4281': 'DocTypeExtension',
+                '4283': 'DocTypeExtensionName',
+                '4284': 'DocTypeExtensionVersion',
+                // EBML Global Elements (may appear under any master)
+                'BF': 'CRC-32',
+                'EC': 'Void',
+
+                // Root Element
+                '18538067': 'Segment',
+
+                // SeekHead Elements
+                '114D9B74': 'SeekHead',
+                '4DBB': 'Seek',
+                '53AB': 'SeekID',
+                '53AC': 'SeekPosition',
+
+                // Info Elements
+                '1549A966': 'Info',
+                '73A4': 'SegmentUUID',
+                '7384': 'SegmentFilename',
+                '3CB923': 'PrevUUID',
+                '3C83AB': 'PrevFilename',
+                '3EB923': 'NextUUID',
+                '3E83BB': 'NextFilename',
+                '4444': 'SegmentFamily',
+                '6924': 'ChapterTranslate',
+                '69A5': 'ChapterTranslateID',
+                '69BF': 'ChapterTranslateCodec',
+                '69FC': 'ChapterTranslateEditionUID',
+                '2AD7B1': 'TimestampScale',
+                '4489': 'Duration',
+                '4461': 'DateUTC',
+                '7BA9': 'Title',
+                '4D80': 'MuxingApp',
+                '5741': 'WritingApp',
+
+                // Cluster Elements
+                '1F43B675': 'Cluster',
+                'E7': 'Timestamp',
+                '5854': 'SilentTracks',
+                '58D7': 'SilentTrackNumber',
+                'A7': 'Position',
+                'AB': 'PrevSize',
+                'A3': 'SimpleBlock',
+                'A0': 'BlockGroup',
+                'A1': 'Block',
+                'A2': 'BlockVirtual',
+                '75A1': 'BlockAdditions',
+                'A6': 'BlockMore',
+                'A5': 'BlockAdditional',
+                'EE': 'BlockAddID',
+                '9B': 'BlockDuration',
+                'FA': 'ReferencePriority',
+                'FB': 'ReferenceBlock',
+                'FD': 'ReferenceVirtual',
+                'A4': 'CodecState',
+                '75A2': 'DiscardPadding',
+                '8E': 'Slices',
+                'E8': 'TimeSlice',
+                'CC': 'LaceNumber',
+                'CD': 'FrameNumber',
+                'CB': 'BlockAdditionID',
+                'CE': 'Delay',
+                'CF': 'SliceDuration',
+                'C8': 'ReferenceFrame',
+                'C9': 'ReferenceOffset',
+                'CA': 'ReferenceTimestamp',
+                'AF': 'EncryptedBlock',
+
+                // Tracks Elements
+                '1654AE6B': 'Tracks',
+                'AE': 'TrackEntry',
+                'D7': 'TrackNumber',
+                '73C5': 'TrackUID',
+                '83': 'TrackType',
+                'B9': 'FlagEnabled',
+                '88': 'FlagDefault',
+                '55AA': 'FlagForced',
+                '55AB': 'FlagHearingImpaired',
+                '55AC': 'FlagVisualImpaired',
+                '55AD': 'FlagTextDescriptions',
+                '55AE': 'FlagOriginal',
+                '55AF': 'FlagCommentary',
+                '9C': 'FlagLacing',
+                '6DE7': 'MinCache',
+                '6DF8': 'MaxCache',
+                '23E383': 'DefaultDuration',
+                '234E7A': 'DefaultDecodedFieldDuration',
+                '23314F': 'TrackTimestampScale',
+                '537F': 'TrackOffset',
+                '55EE': 'MaxBlockAdditionID',
+                '41E4': 'BlockAdditionMapping',
+                '41F0': 'BlockAddIDValue',
+                '41A4': 'BlockAddIDName',
+                '41E7': 'BlockAddIDType',
+                '41ED': 'BlockAddIDExtraData',
+                '536E': 'Name',
+                '22B59C': 'Language',
+                '22B59D': 'LanguageBCP47',
+                '86': 'CodecID',
+                '63A2': 'CodecPrivate',
+                '258688': 'CodecName',
+                '7446': 'AttachmentLink',
+                '3A9697': 'CodecSettings',
+                '3B4040': 'CodecInfoURL',
+                '26B240': 'CodecDownloadURL',
+                'AA': 'CodecDecodeAll',
+                '6FAB': 'TrackOverlay',
+                '56AA': 'CodecDelay',
+                '56BB': 'SeekPreRoll',
+                '6624': 'TrackTranslate',
+                '66A5': 'TrackTranslateTrackID',
+                '66BF': 'TrackTranslateCodec',
+                '66FC': 'TrackTranslateEditionUID',
+
+                // Track — Video Elements
+                'E0': 'Video',
+                '9A': 'FlagInterlaced',
+                '9D': 'FieldOrder',
+                '53B8': 'StereoMode',
+                '53C0': 'AlphaMode',
+                '53B9': 'OldStereoMode',
+                'B0': 'PixelWidth',
+                'BA': 'PixelHeight',
+                '54AA': 'PixelCropBottom',
+                '54BB': 'PixelCropTop',
+                '54CC': 'PixelCropLeft',
+                '54DD': 'PixelCropRight',
+                '54B0': 'DisplayWidth',
+                '54BA': 'DisplayHeight',
+                '54B2': 'DisplayUnit',
+                '54B3': 'AspectRatioType',
+                '2EB524': 'UncompressedFourCC',
+                '2FB523': 'GammaValue',
+                '2383E3': 'FrameRate',
+
+                // Track — Video — Colour Elements
+                '55B0': 'Colour',
+                '55B1': 'MatrixCoefficients',
+                '55B2': 'BitsPerChannel',
+                '55B3': 'ChromaSubsamplingHorz',
+                '55B4': 'ChromaSubsamplingVert',
+                '55B5': 'CbSubsamplingHorz',
+                '55B6': 'CbSubsamplingVert',
+                '55B7': 'ChromaSitingHorz',
+                '55B8': 'ChromaSitingVert',
+                '55B9': 'Range',
+                '55BA': 'TransferCharacteristics',
+                '55BB': 'Primaries',
+                '55BC': 'MaxCLL',
+                '55BD': 'MaxFALL',
+                '55D0': 'MasteringMetadata',
+                '55D1': 'PrimaryRChromaticityX',
+                '55D2': 'PrimaryRChromaticityY',
+                '55D3': 'PrimaryGChromaticityX',
+                '55D4': 'PrimaryGChromaticityY',
+                '55D5': 'PrimaryBChromaticityX',
+                '55D6': 'PrimaryBChromaticityY',
+                '55D7': 'WhitePointChromaticityX',
+                '55D8': 'WhitePointChromaticityY',
+                '55D9': 'LuminanceMax',
+                '55DA': 'LuminanceMin',
+
+                // Track — Video — Projection Elements
+                '7670': 'Projection',
+                '7671': 'ProjectionType',
+                '7672': 'ProjectionPrivate',
+                '7673': 'ProjectionPoseYaw',
+                '7674': 'ProjectionPosePitch',
+                '7675': 'ProjectionPoseRoll',
+
+                // Track — Audio Elements
+                'E1': 'Audio',
+                'B5': 'SamplingFrequency',
+                '78B5': 'OutputSamplingFrequency',
+                '9F': 'Channels',
+                '7D7B': 'ChannelPositions',
+                '6264': 'BitDepth',
+                '52F1': 'Emphasis',
+
+                // Track — Operation Elements
+                'E2': 'TrackOperation',
+                'E3': 'TrackCombinePlanes',
+                'E4': 'TrackPlane',
+                'E5': 'TrackPlaneUID',
+                'E6': 'TrackPlaneType',
+                'E9': 'TrackJoinBlocks',
+                'ED': 'TrackJoinUID',
+                'C0': 'TrickTrackUID',
+                'C1': 'TrickTrackSegmentUID',
+                'C6': 'TrickTrackFlag',
+                'C7': 'TrickMasterTrackUID',
+                'C4': 'TrickMasterTrackSegmentUID',
+
+                // Track — Content Encoding Elements
+                '6D80': 'ContentEncodings',
+                '6240': 'ContentEncoding',
+                '5031': 'ContentEncodingOrder',
+                '5032': 'ContentEncodingScope',
+                '5033': 'ContentEncodingType',
+                '5034': 'ContentCompression',
+                '4254': 'ContentCompAlgo',
+                '4255': 'ContentCompSettings',
+                '5035': 'ContentEncryption',
+                '47E1': 'ContentEncAlgo',
+                '47E2': 'ContentEncKeyID',
+                '47E7': 'ContentEncAESSettings',
+                '47E8': 'AESSettingsCipherMode',
+                '47E3': 'ContentSignature',
+                '47E4': 'ContentSigKeyID',
+                '47E5': 'ContentSigAlgo',
+                '47E6': 'ContentSigHashAlgo',
+
+                // Cues Elements
+                '1C53BB6B': 'Cues',
+                'BB': 'CuePoint',
+                'B3': 'CueTime',
+                'B7': 'CueTrackPositions',
+                'F7': 'CueTrack',
+                'F1': 'CueClusterPosition',
+                'F0': 'CueRelativePosition',
+                'B2': 'CueDuration',
+                '5378': 'CueBlockNumber',
+                'EA': 'CueCodecState',
+                'DB': 'CueReference',
+                '96': 'CueRefTime',
+                '97': 'CueRefCluster',
+                '535F': 'CueRefNumber',
+                'EB': 'CueRefCodecState',
+
+                // Attachments Elements
+                '1941A469': 'Attachments',
+                '61A7': 'AttachedFile',
+                '467E': 'FileDescription',
+                '466E': 'FileName',
+                '4660': 'FileMediaType',
+                '465C': 'FileData',
+                '46AE': 'FileUID',
+                '4675': 'FileReferral',
+                '4661': 'FileUsedStartTime',
+                '4662': 'FileUsedEndTime',
+
+                // Chapters Elements
+                '1043A770': 'Chapters',
+                '45B9': 'EditionEntry',
+                '45BC': 'EditionUID',
+                '45BD': 'EditionFlagHidden',
+                '45DB': 'EditionFlagDefault',
+                '45DD': 'EditionFlagOrdered',
+                '4520': 'EditionDisplay',
+                '4521': 'EditionString',
+                '45E4': 'EditionLanguageIETF',
+                'B6': 'ChapterAtom',
+                '73C4': 'ChapterUID',
+                '5654': 'ChapterStringUID',
+                '91': 'ChapterTimeStart',
+                '92': 'ChapterTimeEnd',
+                '98': 'ChapterFlagHidden',
+                '4598': 'ChapterFlagEnabled',
+                '6E67': 'ChapterSegmentUUID',
+                '4588': 'ChapterSkipType',
+                '6EBC': 'ChapterSegmentEditionUID',
+                '63C3': 'ChapterPhysicalEquiv',
+                '8F': 'ChapterTrack',
+                '89': 'ChapterTrackUID',
+                '80': 'ChapterDisplay',
+                '85': 'ChapString',
+                '437C': 'ChapLanguage',
+                '437D': 'ChapLanguageBCP47',
+                '437E': 'ChapCountry',
+                '6944': 'ChapProcess',
+                '6955': 'ChapProcessCodecID',
+                '450D': 'ChapProcessPrivate',
+                '6911': 'ChapProcessCommand',
+                '6922': 'ChapProcessTime',
+                '6933': 'ChapProcessData',
+
+                // Tags Elements
+                '1254C367': 'Tags',
+                '7373': 'Tag',
+                '63C0': 'Targets',
+                '68CA': 'TargetTypeValue',
+                '63CA': 'TargetType',
+                '63C5': 'TagTrackUID',
+                '63C9': 'TagEditionUID',
+                '63C4': 'TagChapterUID',
+                '63C6': 'TagAttachmentUID',
+                '63C7': 'TagBlockAddIDValue',
+                '67C8': 'SimpleTag',
+                '45A3': 'TagName',
+                '447A': 'TagLanguage',
+                '447B': 'TagLanguageBCP47',
+                '4484': 'TagDefault',
+                '44B4': 'TagDefaultBogus',
+                '4487': 'TagString',
+                '4485': 'TagBinary'
+            };
+            return names[id] || '';
+        }
+
+        function inlineValue(el) {
+            const pt = el.get_payload_type();
+            // Master/Binary have no scalar; Float is misdecoded by the wasm reader, so skip it.
+            if (pt === 'Master' || pt === 'Binary' || pt === 'Float') return '';
+            try {
+                const v = el.get_payload();
+                if (v == null) return '';
+                if (typeof v === 'bigint' || typeof v === 'number' || typeof v === 'string') {
+                    const s = String(v);
+                    if (!s || s.length > 48) return '';
+                    return `<span class="val">= ${escapeHtml(s)}</span>`;
+                }
+            } catch (_) { /* payload not a primitive */ }
+            return '';
+        }
+
+        function selectNode(node, el) {
+            if (selectedNode) selectedNode.classList.remove('selected');
+            selectedNode = node;
+            node.classList.add('selected');
+            renderHex(el);
+        }
+
+        // ---------- hex pane ----------
+        function resetHex() {
+            $('#hex-head').innerHTML = 'Hex inspector';
+            $('#hex').innerHTML = '<div class="hex-empty">&lsaquo; select an element to inspect its bytes &rsaquo;</div>';
+        }
+
+        async function renderHex(el) {
+            if (!currentFile) return;
+            const off = Number(el.get_offset());
+            const total = Number(el.get_size());
+            const len = Math.min(total, HEX_CAP);
+
+            const note = total > HEX_CAP
+                ? ` <span class="note">showing first ${fmtBytes(len)} of ${fmtElemSize(total)}</span>`
+                : '';
+            $('#hex-head').innerHTML =
+                `<span class="sel-id">${id0x(el)}</span> ` +
+                `<span class="sel-type">${el.get_payload_type()}</span> ` +
+                `&middot; offset ${off} &middot; ${fmtElemSize(total)}${note}`;
+
+            const hex = $('#hex');
+            hex.innerHTML = '<div class="hex-empty">reading…</div>';
+
+            const buf = await currentFile.slice(off, off + len).arrayBuffer();
+            hex.innerHTML = hexDump(new Uint8Array(buf), off);
+            hex.scrollTop = 0;
+        }
+
+        function hexDump(bytes, baseOffset) {
+            const lines = [];
+            for (let i = 0; i < bytes.length; i += 16) {
+                const slice = bytes.subarray(i, i + 16);
+                const addr = (baseOffset + i).toString(16).padStart(8, '0');
+
+                let hx = '';
+                let asc = '';
+                for (let j = 0; j < 16; j++) {
+                    if (j < slice.length) {
+                        const b = slice[j];
+                        const hh = b.toString(16).padStart(2, '0');
+                        hx += b === 0 ? `<span class="z">${hh}</span>` : hh;
+                        hx += (j === 7) ? '  ' : ' ';
+                        if (b >= 0x20 && b < 0x7f) asc += escapeHtml(String.fromCharCode(b));
+                        else asc += '<span class="np">.</span>';
+                    } else {
+                        hx += (j === 7) ? '    ' : '   ';
+                        asc += ' ';
+                    }
+                }
+                lines.push(`<div class="hline"><span class="off">${addr}</span>  ` +
+                    `<span class="hx">${hx}</span> <span class="as">${asc}</span></div>`);
+            }
+            return lines.join('');
+        }
+
+        // ---------- helpers ----------
+        // EBML vint length from its first byte (leading-zero count + 1).
+        function vintLen(b) {
+            let mask = 0x80, len = 1;
+            while (len <= 8 && !(b & mask)) { mask >>= 1; len++; }
+            return len;
+        }
+
+        // The wasm reader misdecodes Matroska floats (they are big-endian, 4 or 8 bytes),
+        // so read the element's raw bytes from the file and decode the float ourselves.
+        async function readBEFloat(el) {
+            if (!currentFile) return null;
+            const off = Number(el.get_offset());
+            const size = Number(el.get_size());
+            const bytes = new Uint8Array(await currentFile.slice(off, off + size).arrayBuffer());
+            const dataStart = vintLen(bytes[0]) + vintLen(bytes[vintLen(bytes[0])]);
+            const dataLen = size - dataStart;
+            const dv = new DataView(bytes.buffer, bytes.byteOffset + dataStart, dataLen);
+            if (dataLen === 4) return dv.getFloat32(0, false);
+            if (dataLen === 8) return dv.getFloat64(0, false);
+            return null;
+        }
+
+        // EBML elements may declare an "unknown size" (all-ones vint), surfacing as a value far
+        // larger than the file; show that as ∞ rather than a nonsensical "65536 TB".
+        function fmtElemSize(n) {
+            if (currentFile && n > currentFile.size) return '∞ unknown';
+            return fmtBytes(n);
+        }
+
+        function fmtBytes(n) {
+            if (n < 1024) return n + ' B';
+            const u = ['KB', 'MB', 'GB', 'TB'];
+            let i = -1;
+            do { n /= 1024; i++; } while (n >= 1024 && i < u.length - 1);
+            return n.toFixed(n < 10 ? 2 : 1) + ' ' + u[i];
+        }
+
+        function fmtDuration(sec) {
+            sec = Math.round(sec);
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            const s = sec % 60;
+            const pad = (x) => String(x).padStart(2, '0');
+            return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+    </script>
+</body>
+</html>

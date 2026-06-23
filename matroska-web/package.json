@@ -1,0 +1,13 @@
+{
+  "name": "matroska-web",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "simple-http-server -i --cors --port 8501"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "AGPL-3.0-only",
+  "dependencies": {}
+}

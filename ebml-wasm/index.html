@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8" />
+    <title>hello-wasm example</title>
+</head>
+<body>
+
+<button id="nextButton">Next</button>
+
+<ul id="list"></ul>
+
+<script type="module">
+    import init, { WrappedEbmlElement, EbmlReader, FetchSourceEbml } from "./pkg/ebml_wasm.js";
+
+    /**
+     *
+     * @param el WrappedEbmlElement
+     */
+    function printElement(el, list) {
+        let id_str = el.get_id().toString(16);
+        id_str = "0x" + id_str.toUpperCase();
+
+        let new_el = document.createElement('li')
+        new_el.innerText = id_str + " - " + el.get_payload_type();
+
+        if(el.get_payload_type() === 'Master') {
+            let loadFurther = document.createElement('button');
+            loadFurther.innerText = 'Load...';
+            new_el.appendChild(loadFurther);
+
+            loadFurther.addEventListener('click', async() => {
+                const master = el.get_payload();
+                const deep_ul = document.createElement('ul');
+                new_el.appendChild(deep_ul);
+
+                async function load_more() {
+                    for(let i = 0; i < 10; i++) {
+                        let element = await master.next();
+                        if (element) {
+                            printElement(element, deep_ul);
+                        } else {
+                            loadFurther.remove();
+                            break;
+                        }
+                    }
+                }
+
+                loadFurther.addEventListener('click', load_more);
+                await load_more();
+            }, { once: true });
+        }
+
+        list.appendChild(new_el);
+    }
+
+    init().then(async () => {
+        let file_source = FetchSourceEbml.new("/example/sample.mkv");
+        let reader = EbmlReader.new_endless(BigInt(0), file_source);
+
+        const head_doc = await reader.next();
+        const body_doc = await reader.next();
+
+        let head = head_doc.get_payload();
+
+        document.getElementById('nextButton').addEventListener("click", async() => {
+            for(let i = 0; i < 10; i++) {
+                let element = await head.next();
+                if(element) {
+                    printElement(element, document.getElementById('list'));
+                } else {
+                    head = body_doc.get_payload();
+                    break;
+                }
+            }
+        });
+    });
+</script>
+</body>
+</html>
