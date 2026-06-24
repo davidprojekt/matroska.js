@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>matroska.js — MKV player</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: #111;
+        color: #eee;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.5rem;
+      }
+      h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
+      .stage { width: min(100%, 1100px); }
+      video-player { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+      video { width: 100%; height: 100%; }
+      .panel {
+        width: min(100%, 1100px);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1.25rem;
+        align-items: center;
+        background: #1b1b1b;
+        border: 1px solid #2a2a2a;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+      }
+      .panel label { font-size: 0.85rem; color: #bbb; display: flex; gap: 0.4rem; align-items: center; }
+      .panel input[type="text"] { width: 28rem; max-width: 60vw; background: #000; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 0.35rem 0.5rem; }
+      .panel select, .panel button { background: #000; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 0.35rem 0.5rem; }
+      .panel button { cursor: pointer; }
+      #status { font-size: 0.8rem; color: #8a8; min-height: 1em; width: min(100%, 1100px); white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>matroska.js — MKV → fMP4 → MSE player (video.js v10)</h1>
+
+    <div class="panel">
+      <label>URL
+        <input id="url" type="text" value="http://localhost:8501/example/toaru.mkv" />
+      </label>
+      <button id="load">Load</button>
+      <label>Audio
+        <select id="audio"></select>
+      </label>
+      <label>Subtitles
+        <select id="subs"></select>
+      </label>
+    </div>
+
+    <div class="stage">
+      <video-player>
+        <video-skin>
+          <video slot="media" playsinline crossorigin="anonymous"></video>
+        </video-skin>
+      </video-player>
+    </div>
+
+    <div id="status"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

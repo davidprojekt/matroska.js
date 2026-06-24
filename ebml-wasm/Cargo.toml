@@ -10,9 +10,12 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 cache-rs = "=0.4.0"
 gloo-net = "0.7.0"
+futures = "0.3"
 # web-sys = { version = "0.3.99", features = ["console"] }
 ebml-spec = { path = "../ebml-spec" }
 lru = "0.18.0"
 wasm-bindgen = "0.2.122"
 wasm-bindgen-futures = "0.4.72"
-muxide = "0.2.5"
+
+[dev-dependencies]
+pollster = "0.4"

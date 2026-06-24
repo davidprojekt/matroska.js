@@ -2,7 +2,12 @@ pub mod fetch_source;
 pub mod ebml;
 pub mod matroska_data;
 pub mod fs_source;
-pub mod mp4;
+pub mod mem_source;
+pub mod track;
+pub mod index;
+pub mod fmp4;
+pub mod remux;
+pub mod player;
 
 use wasm_bindgen::prelude::*;
 use std::collections::HashMap;
