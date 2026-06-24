@@ -121,6 +121,9 @@ impl TrackData {
             "A_OPUS" => Some("opus".to_string()),
             "A_AC3" => Some("ac-3".to_string()),
             "A_EAC3" => Some("ec-3".to_string()),
+            "A_FLAC" => Some("flac".to_string()),
+            // MPEG-1/2 Audio Layer III, muxed as mp4a with object-type 0x6B.
+            "A_MPEG/L3" => Some("mp4a.6B".to_string()),
             _ => None,
         }
     }
@@ -136,6 +139,8 @@ impl TrackData {
             "A_OPUS" => "Opus",
             "A_AC3" => "ac-3",
             "A_EAC3" => "ec-3",
+            "A_FLAC" => "fLaC",
+            "A_MPEG/L3" => "mp4a",
             _ => return None,
         })
     }

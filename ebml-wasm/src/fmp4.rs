@@ -34,6 +34,12 @@ pub enum CodecConfig {
     Opus(Vec<u8>),
     /// AC-3: `CodecPrivate` (may be empty; dac3 then defaulted).
     Ac3(Vec<u8>),
+    /// FLAC: `CodecPrivate` is the native FLAC header (`fLaC` marker + metadata
+    /// blocks); the `dfLa` payload is those metadata blocks.
+    Flac(Vec<u8>),
+    /// MP3 (MPEG-1/2 Layer III): no `CodecPrivate`; muxed as `mp4a` with an `esds`
+    /// whose object-type indication is MPEG-1 Audio.
+    Mp3,
 }
 
 impl CodecConfig {
@@ -47,6 +53,8 @@ impl CodecConfig {
             CodecConfig::Aac(_) => b"mp4a",
             CodecConfig::Opus(_) => b"Opus",
             CodecConfig::Ac3(_) => b"ac-3",
+            CodecConfig::Flac(_) => b"fLaC",
+            CodecConfig::Mp3 => b"mp4a",
         }
     }
 
@@ -67,6 +75,8 @@ impl CodecConfig {
             CodecConfig::Aac(asc) => build_esds(asc),
             CodecConfig::Opus(head) => build_dops(head, kind),
             CodecConfig::Ac3(cp) => boxed(b"dac3", cp),
+            CodecConfig::Flac(cp) => build_dfla(cp),
+            CodecConfig::Mp3 => build_esds_mp3(),
         }
     }
 }
@@ -334,7 +344,10 @@ fn build_sample_entry(cfg: &TrackConfig) -> Vec<u8> {
             p.extend_from_slice(&16u16.to_be_bytes()); // sample size
             p.extend_from_slice(&0u16.to_be_bytes()); // pre-defined
             p.extend_from_slice(&0u16.to_be_bytes()); // reserved
-            p.extend_from_slice(&(sample_rate << 16).to_be_bytes()); // 16.16 fixed
+            // 16.16 fixed-point: the integer part only spans 16 bits, so rates above
+            // 65535 (hi-res FLAC at 96/192 kHz) don't fit. Cap the field — the true
+            // rate lives in the codec config (STREAMINFO/esds) and the mdhd timescale.
+            p.extend_from_slice(&(sample_rate.min(0xFFFF) << 16).to_be_bytes());
             p.extend_from_slice(&config_box);
             boxed(fourcc, &p)
         }
@@ -370,15 +383,28 @@ fn descriptor(tag: u8, payload: &[u8]) -> Vec<u8> {
 
 /// Build an `esds` box wrapping the AAC AudioSpecificConfig.
 fn build_esds(asc: &[u8]) -> Vec<u8> {
-    let dec_specific = descriptor(0x05, asc); // DecoderSpecificInfo
+    // objectTypeIndication 0x40 = Audio ISO/IEC 14496-3, with the ASC as DecoderSpecificInfo.
+    build_esds_inner(0x40, Some(asc))
+}
 
+/// Build an `esds` box for MP3. MP3 carries no DecoderSpecificInfo; the
+/// objectTypeIndication 0x6B (MPEG-1 Audio) is all the decoder needs.
+fn build_esds_mp3() -> Vec<u8> {
+    build_esds_inner(0x6B, None)
+}
+
+/// Shared `esds` builder. `dec_specific_info` is the DecoderSpecificInfo (AAC ASC);
+/// MP3 passes `None`.
+fn build_esds_inner(object_type_indication: u8, dec_specific_info: Option<&[u8]>) -> Vec<u8> {
     let mut dcd = Vec::new();
-    dcd.push(0x40); // objectTypeIndication: Audio ISO/IEC 14496-3
+    dcd.push(object_type_indication);
     dcd.push(0x15); // streamType=5 (audio) << 2 | upstream=0 | reserved=1
     dcd.extend_from_slice(&[0, 0, 0]); // bufferSizeDB
     dcd.extend_from_slice(&0u32.to_be_bytes()); // maxBitrate
     dcd.extend_from_slice(&0u32.to_be_bytes()); // avgBitrate
-    dcd.extend_from_slice(&dec_specific);
+    if let Some(asc) = dec_specific_info {
+        dcd.extend_from_slice(&descriptor(0x05, asc)); // DecoderSpecificInfo
+    }
     let dec_config = descriptor(0x04, &dcd); // DecoderConfigDescriptor
 
     let sl = descriptor(0x06, &[0x02]); // SLConfigDescriptor: predefined
@@ -394,6 +420,24 @@ fn build_esds(asc: &[u8]) -> Vec<u8> {
     payload.extend_from_slice(&0u32.to_be_bytes()); // FullBox version + flags
     payload.extend_from_slice(&es_descriptor);
     boxed(b"esds", &payload)
+}
+
+/// Build a `dfLa` (FLACSpecificBox) from the MKV FLAC `CodecPrivate`.
+///
+/// The Matroska FLAC `CodecPrivate` is the start of a native FLAC stream: the
+/// `fLaC` marker followed by the metadata blocks (STREAMINFO first, last block
+/// flagged). `dfLa` carries those metadata blocks verbatim, without the marker,
+/// behind a FullBox version+flags word.
+fn build_dfla(codec_private: &[u8]) -> Vec<u8> {
+    let blocks = if codec_private.len() >= 4 && &codec_private[0..4] == b"fLaC" {
+        &codec_private[4..]
+    } else {
+        codec_private
+    };
+    let mut p = Vec::with_capacity(4 + blocks.len());
+    p.extend_from_slice(&0u32.to_be_bytes()); // version + flags
+    p.extend_from_slice(blocks);
+    boxed(b"dfLa", &p)
 }
 
 /// Build a `dOps` box from the MKV OpusHead `CodecPrivate`.
@@ -584,6 +628,60 @@ mod tests {
         assert!(find_box(&init, b"smhd").is_some());
         assert!(find_box(&init, b"mp4a").is_some());
         assert!(find_box(&init, b"esds").is_some());
+    }
+
+    #[test]
+    fn flac_init_has_flac_sample_entry_and_dfla() {
+        // CodecPrivate = "fLaC" marker + a (truncated) STREAMINFO metadata block.
+        // Header byte 0x80 = last-block flag set, block type 0 (STREAMINFO).
+        let codec_private = {
+            let mut cp = b"fLaC".to_vec();
+            cp.push(0x80);
+            cp.extend_from_slice(&[0, 0, 34]); // block length
+            cp.extend_from_slice(&[0x10, 0x00, 0x10, 0x00]); // min/max blocksize = 4096
+            cp.extend_from_slice(&[0u8; 30]); // rest of STREAMINFO
+            cp
+        };
+        let cfg = TrackConfig {
+            track_id: 2,
+            timescale: 44100,
+            duration: 0,
+            language: "eng".to_string(),
+            kind: MediaKind::Audio {
+                sample_rate: 44100,
+                channels: 2,
+            },
+            codec: CodecConfig::Flac(codec_private),
+        };
+        let init = build_init_segment(&cfg);
+        assert!(find_box(&init, b"fLaC").is_some());
+        let dfla = find_box(&init, b"dfLa").expect("dfLa box present");
+        // dfLa payload = 4-byte version/flags, then metadata blocks WITHOUT the marker.
+        // First metadata block header byte (last-block flag + type) lives at dfla+12.
+        assert_eq!(init[dfla + 12], 0x80);
+    }
+
+    #[test]
+    fn mp3_init_has_mp4a_and_esds_with_mpeg_audio_oti() {
+        let cfg = TrackConfig {
+            track_id: 2,
+            timescale: 44100,
+            duration: 0,
+            language: "eng".to_string(),
+            kind: MediaKind::Audio {
+                sample_rate: 44100,
+                channels: 2,
+            },
+            codec: CodecConfig::Mp3,
+        };
+        let init = build_init_segment(&cfg);
+        assert!(find_box(&init, b"mp4a").is_some());
+        let esds = find_box(&init, b"esds").expect("esds box present");
+        // The DecoderConfigDescriptor (tag 0x04) carries objectTypeIndication 0x6B.
+        let tail = &init[esds..];
+        let dcd = tail.windows(1).position(|w| w == [0x04]).unwrap();
+        // tag(1) + length byte(1) → objectTypeIndication.
+        assert_eq!(tail[dcd + 2], 0x6B);
     }
 
     #[test]

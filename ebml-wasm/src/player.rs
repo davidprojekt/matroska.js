@@ -212,6 +212,8 @@ where
             "A_AAC" => CodecConfig::Aac(cp?),
             "A_OPUS" => CodecConfig::Opus(cp?),
             "A_AC3" | "A_EAC3" => CodecConfig::Ac3(cp.unwrap_or_default()),
+            "A_FLAC" => CodecConfig::Flac(cp?),
+            "A_MPEG/L3" => CodecConfig::Mp3,
             _ => return None,
         })
     }
@@ -276,7 +278,7 @@ where
 
         let (base, samples) = if is_audio {
             let sample_rate = track.sampling_frequency.unwrap_or(48000.0) as u32;
-            let spf = samples_per_frame(track.codec_id.as_deref());
+            let spf = samples_per_frame(track.codec_id.as_deref(), track.codec_private.as_deref());
             audio_samples(&frames, spf, sample_rate, self.timestamp_scale_ns)
         } else {
             let frame_dur = track
@@ -568,12 +570,29 @@ async fn walk_cluster_subtitles<M: EbmlSource + PartialEq + Clone>(
     }
 }
 
-fn samples_per_frame(codec_id: Option<&str>) -> u32 {
+fn samples_per_frame(codec_id: Option<&str>, codec_private: Option<&[u8]>) -> u32 {
     match codec_id {
         Some("A_OPUS") => 960,
         Some("A_AC3") | Some("A_EAC3") => 1536,
+        // MPEG-1 Layer III is 1152 samples/frame (the common case; MPEG-2/2.5 use
+        // 576, which we don't distinguish here — per-segment PTS re-anchors any drift).
+        Some("A_MPEG/L3") => 1152,
+        // FLAC block size is per-stream; read it from STREAMINFO, default 4096.
+        Some("A_FLAC") => flac_block_size(codec_private).unwrap_or(4096),
         _ => 1024, // AAC and default
     }
+}
+
+/// FLAC frame size (samples) from the STREAMINFO max-blocksize field in the MKV
+/// `CodecPrivate`. Layout: optional `fLaC` marker (4), metadata block header (4),
+/// then STREAMINFO data starting with min_blocksize(2) and max_blocksize(2), both
+/// big-endian. For the common fixed-block stream min == max.
+fn flac_block_size(codec_private: Option<&[u8]>) -> Option<u32> {
+    let cp = codec_private?;
+    let streaminfo = if cp.len() >= 4 && &cp[0..4] == b"fLaC" { 8 } else { 4 };
+    let max = cp.get(streaminfo + 2..streaminfo + 4)?;
+    let v = u16::from_be_bytes([max[0], max[1]]) as u32;
+    (v > 0).then_some(v)
 }
 
 fn json_escape(s: &str) -> String {

@@ -33,6 +33,33 @@ This is a Cargo workspace + a small web frontend:
 | `player-web`  | The **MKV player** frontend: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the WASM remuxer, with a custom audio-track selector and native WebVTT subtitle tracks. |
 | `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). |
 
+## Supported codecs
+
+The remuxer copies encoded frames straight into fMP4 — it never transcodes. A track
+plays only if **both** the remuxer can wrap its codec (below) **and** the browser can
+decode that codec in MP4 via Media Source Extensions. Tracks the remuxer can't wrap are
+listed as *not muxable*; tracks it wraps but the browser can't decode are flagged
+*unsupported* (e.g. HEVC in Firefox, AC-3 in Chrome/Firefox).
+
+| Kind      | Matroska `CodecID`                 | Codec                | fMP4 sample entry |
+| --------- | ---------------------------------- | -------------------- | ----------------- |
+| Video     | `V_MPEG4/ISO/AVC`                  | H.264 / AVC          | `avc1`            |
+| Video     | `V_MPEGH/ISO/HEVC`                 | H.265 / HEVC         | `hvc1`            |
+| Video     | `V_VP9`                            | VP9                  | `vp09`            |
+| Video     | `V_AV1`                            | AV1                  | `av01`            |
+| Audio     | `A_AAC`                            | AAC                  | `mp4a`            |
+| Audio     | `A_OPUS`                           | Opus                 | `Opus`            |
+| Audio     | `A_AC3`                            | AC-3                 | `ac-3`            |
+| Audio     | `A_EAC3`                           | E-AC-3               | `ec-3`            |
+| Audio     | `A_FLAC`                           | FLAC                 | `fLaC`            |
+| Audio     | `A_MPEG/L3`                        | MP3                  | `mp4a` (`.6B`)    |
+| Subtitle  | `S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASCII` | text → WebVTT | (extracted)   |
+
+Anything else (DTS, TrueHD, Vorbis, PCM; MPEG-2/older video; `S_TEXT/ASS`) is not
+muxable today and would need transcoding (planned via ffmpeg-wasm) or, for ASS,
+[libass](https://github.com/libass/libass). MP3 frame durations assume MPEG-1 Layer III
+(1152 samples/frame); the rarer MPEG-2/2.5 Layer III (576) is not yet distinguished.
+
 ## Build & run
 
 You'll need the Rust toolchain and [`wasm-pack`](https://rustwasm.github.io/wasm-pack/).
