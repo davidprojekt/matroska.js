@@ -303,9 +303,11 @@ where
         let mut out = Vec::new();
         let mut clusters = self.iter_at(start_offset, Some(self.segment_end));
 
-        // We stop once a block's PTS reaches end_ticks (inside walk_cluster_frames).
-        // That reads at most one cluster past the range — cheap now that each cluster
-        // is a single request, and always correct regardless of cue/cluster density.
+        // Tile on whole clusters. A cluster is a complete, keyframe-bounded set of
+        // GOPs, so taking it whole avoids splitting reordered (B-frame) sequences —
+        // which would leave holes in the presentation timeline and stall the decoder.
+        // We peek each cluster's timestamp (a tiny read) and stop at the first cluster
+        // that begins at or after end_ticks, so the boundary cluster is never fetched.
         while let Some(el) = clusters.next().await {
             if el.id != ID_CLUSTER {
                 continue;
@@ -313,14 +315,35 @@ where
             let EbmlPayload::Master(cluster) = el.payload else {
                 continue;
             };
-            let buffered = self
-                .buffer_range(cluster.current, cluster.end.unwrap_or(self.segment_end))
-                .await;
-            if walk_cluster_frames(buffered, track_number, end_ticks, &mut out).await {
+            let cstart = cluster.current;
+            let cend = cluster.end.unwrap_or(self.segment_end);
+            let cluster_time = self.peek_cluster_time(cstart, cend).await;
+            if !out.is_empty() && cluster_time >= end_ticks {
                 break;
             }
+            let buffered = self.buffer_range(cstart, cend).await;
+            collect_cluster_frames(buffered, track_number, &mut out).await;
         }
         out
+    }
+
+    /// Read just a cluster's leading bytes to recover its `Timestamp` without
+    /// buffering the whole cluster (the timestamp precedes any blocks).
+    async fn peek_cluster_time(&self, cstart: u64, cend: u64) -> i64 {
+        let peek_end = (cstart + 256).min(cend);
+        let mut it = self.buffer_range(cstart, peek_end).await;
+        while let Some(child) = it.next().await {
+            match child.id {
+                ID_TIMESTAMP => {
+                    if let EbmlPayload::UnsignedInt(v) = child.payload {
+                        return v as i64;
+                    }
+                }
+                ID_SIMPLEBLOCK | ID_BLOCKGROUP => break,
+                _ => {}
+            }
+        }
+        0
     }
 
     /// Collect all subtitle cues for a track (full cluster scan) as a WebVTT doc.
@@ -356,13 +379,33 @@ where
         (self.duration_ticks * self.timestamp_scale_ns as f64 / 1e6) as u64
     }
 
-    /// Cue presentation times in milliseconds (the keyframe-aligned segment
-    /// boundaries JS should tile media segments on). Empty when the file has no Cues.
+    /// Cue presentation times in milliseconds for the **video** track only, the real
+    /// keyframe/cluster boundaries JS should tile segments on. Files often index cues
+    /// for every track (frequent, mid-cluster audio cues), which would otherwise make
+    /// thousands of tiny overlapping segments. Deduplicated and ascending. Empty when
+    /// the file has no usable Cues.
     pub fn cue_times_ms(&self) -> Vec<u64> {
-        self.cues
+        let video_track = self
+            .tracks
             .iter()
-            .map(|c| (c.time as u128 * self.timestamp_scale_ns as u128 / 1_000_000) as u64)
-            .collect()
+            .find(|t| t.track_type == Some(TrackType::Video))
+            .and_then(|t| t.track_number);
+
+        let mut out: Vec<u64> = Vec::new();
+        for c in &self.cues {
+            let indexes_video = match video_track {
+                Some(vt) => c.positions.iter().any(|p| p.track == vt),
+                None => true,
+            };
+            if !indexes_video {
+                continue;
+            }
+            let ms = (c.time as u128 * self.timestamp_scale_ns as u128 / 1_000_000) as u64;
+            if out.last() != Some(&ms) {
+                out.push(ms);
+            }
+        }
+        out
     }
 
     pub fn timestamp_scale(&self) -> u64 {
@@ -399,12 +442,9 @@ where
 // Generic in-memory cluster walking (works over MemSource or any EbmlSource).
 // ----------------------------------------------------------------------------
 
-/// Append a block's frames to `out`; returns true once `end_ticks` is reached.
-fn push_block(out: &mut Vec<TimedFrame>, block: &BlockFrames, cluster_time: i64, end_ticks: i64) -> bool {
+/// Append all of a block's frames to `out` at the block's absolute PTS.
+fn push_block(out: &mut Vec<TimedFrame>, block: &BlockFrames, cluster_time: i64) {
     let pts = cluster_time + block.rel_timecode as i64;
-    if !out.is_empty() && pts >= end_ticks {
-        return true;
-    }
     for frame in &block.frames {
         out.push(TimedFrame {
             pts_ticks: pts,
@@ -412,17 +452,14 @@ fn push_block(out: &mut Vec<TimedFrame>, block: &BlockFrames, cluster_time: i64,
             is_keyframe: block.is_keyframe,
         });
     }
-    false
 }
 
-/// Walk one cluster's children, collecting `track_number`'s frames. Returns true if
-/// `end_ticks` was reached (caller should stop iterating clusters).
-async fn walk_cluster_frames<M: EbmlSource + PartialEq + Clone>(
+/// Collect every `track_number` frame in one (already-buffered) cluster.
+async fn collect_cluster_frames<M: EbmlSource + PartialEq + Clone>(
     mut cluster: EbmlIterator<M>,
     track_number: u64,
-    end_ticks: i64,
     out: &mut Vec<TimedFrame>,
-) -> bool {
+) {
     let mut cluster_time: i64 = 0;
     while let Some(child) = cluster.next().await {
         match child.payload {
@@ -430,24 +467,19 @@ async fn walk_cluster_frames<M: EbmlSource + PartialEq + Clone>(
             EbmlPayload::Binary((start, end)) if child.id == ID_SIMPLEBLOCK => {
                 let bytes = cluster.read_range(start, end).await;
                 if let Some(block) = parse_block(&bytes, true, false) {
-                    if block.track_number == track_number
-                        && push_block(out, &block, cluster_time, end_ticks)
-                    {
-                        return true;
+                    if block.track_number == track_number {
+                        push_block(out, &block, cluster_time);
                     }
                 }
             }
             EbmlPayload::Master(group) if child.id == ID_BLOCKGROUP => {
                 if let Some(block) = read_block_group(group, track_number).await {
-                    if push_block(out, &block, cluster_time, end_ticks) {
-                        return true;
-                    }
+                    push_block(out, &block, cluster_time);
                 }
             }
             _ => {}
         }
     }
-    false
 }
 
 async fn read_block_group<M: EbmlSource + PartialEq + Clone>(

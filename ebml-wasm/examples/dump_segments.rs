@@ -27,6 +27,13 @@ fn main() {
 
         println!("timestamp_scale_ns = {}", demux.timestamp_scale());
         println!("duration_ms        = {}", demux.duration_ms());
+        let ct = demux.cue_times_ms();
+        println!(
+            "cue_times: count={} first8={:?} last8={:?}",
+            ct.len(),
+            &ct[..ct.len().min(8)],
+            &ct[ct.len().saturating_sub(8)..]
+        );
         println!("tracks = {}", demux.tracks_json());
 
         // Parse the track JSON loosely to find track numbers + types.
@@ -69,6 +76,33 @@ fn main() {
                     );
                 }
                 None => println!("track {number}: no media segment in [0,4000ms]"),
+            }
+
+            // Stitch consecutive cue-aligned segments to check timeline continuity
+            // (no holes/overlaps across segment boundaries), for video and audio,
+            // both near the start and mid-file.
+            let cue_times = demux.cue_times_ms();
+            if kind == "video" && cue_times.len() > 2 {
+                // One long *continuous* stitch from 0, so references are always present
+                // and any gap is a genuine muxing hole (not a cold-start artifact).
+                let mut boundaries: Vec<u64> = cue_times.iter().copied().take(140).collect();
+                if boundaries[0] != 0 {
+                    boundaries.insert(0, 0);
+                }
+                let mut stitched = init.clone();
+                for w in boundaries.windows(2) {
+                    if let Some(seg) = demux.media_segment(number, w[0], w[1]).await {
+                        stitched.extend_from_slice(&seg);
+                    }
+                }
+                let path = format!("{}/stitched_{}.mp4", out_dir, number);
+                fs::write(&path, &stitched).unwrap();
+                println!(
+                    "track {number}: stitched {} segments (to {}ms) → {}",
+                    boundaries.len() - 1,
+                    boundaries.last().unwrap(),
+                    path
+                );
             }
 
             // Mid-file segment: exercises the seek-target path with a non-zero tfdt.
