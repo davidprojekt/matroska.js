@@ -579,7 +579,7 @@
                     while ((f = await info.next())) {
                         const fid = idHex(f);
                         if (fid === ID.Title) meta.title = f.get_payload();
-                        else if (fid === ID.Duration) meta.duration = await readBEFloat(f);
+                        else if (fid === ID.Duration) meta.duration = Number(f.get_payload());
                         else if (fid === ID.TimestampScale) meta.scale = Number(f.get_payload());
                     }
                 } else if (id === ID.Tracks) {
@@ -1165,8 +1165,8 @@
 
         function inlineValue(el) {
             const pt = el.get_payload_type();
-            // Master/Binary have no scalar; Float is misdecoded by the wasm reader, so skip it.
-            if (pt === 'Master' || pt === 'Binary' || pt === 'Float') return '';
+            // Master/Binary have no scalar; skip it.
+            if (pt === 'Master' || pt === 'Binary') return '';
             try {
                 const v = el.get_payload();
                 if (v == null) return '';
@@ -1252,21 +1252,6 @@
         // Where an element's payload begins within its raw bytes: past the ID vint + the size vint.
         function payloadStart(bytes) {
             return vintLen(bytes[0]) + vintLen(bytes[vintLen(bytes[0])]);
-        }
-
-        // The wasm reader misdecodes Matroska floats (they are big-endian, 4 or 8 bytes),
-        // so read the element's raw bytes from the file and decode the float ourselves.
-        async function readBEFloat(el) {
-            if (!currentSource) return null;
-            const off = Number(el.get_offset());
-            const size = Number(el.get_size());
-            const bytes = new Uint8Array(await currentSource.readBytes(off, size));
-            const dataStart = payloadStart(bytes);
-            const dataLen = size - dataStart;
-            const dv = new DataView(bytes.buffer, bytes.byteOffset + dataStart, dataLen);
-            if (dataLen === 4) return dv.getFloat32(0, false);
-            if (dataLen === 8) return dv.getFloat64(0, false);
-            return null;
         }
 
         // EBML elements may declare an "unknown size" (all-ones vint), surfacing as a value far

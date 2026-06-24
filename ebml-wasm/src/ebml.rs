@@ -306,12 +306,22 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
     }
 
     pub fn bytes_to_float(raw_bytes: Vec<u8>) -> f64 {
-        let mut bytes: [u8; 8] = [0; 8];
-        let offset = 8 - raw_bytes.len();
-        bytes[offset..].copy_from_slice(raw_bytes.as_slice());
-        let integer_result = f64::from_be_bytes(bytes);
-
-        integer_result
+        // adding left padding zeros to the bytes of a big endian float changes the value
+        match raw_bytes.len() {
+            0 => 0.0,
+            4 => {
+                let array: [u8; 4] = raw_bytes.try_into().unwrap();
+                f32::from_be_bytes(array) as f64
+            }
+            8 => {
+                let array: [u8; 8] = raw_bytes.try_into().unwrap();
+                f64::from_be_bytes(array)
+            }
+            _ => {
+                // EBML specification only allows 0, 4, or 8 byte floats
+                panic!("Invalid EBML float length: {} bytes", raw_bytes.len());
+            }
+        }
     }
 
     pub fn bytes_to_string(raw_bytes: Vec<u8>) -> String {
