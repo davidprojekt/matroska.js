@@ -17,6 +17,13 @@ thread_local! {
     pub static READ_CACHE: RefCell<LruCache<String, Box<[u8]>>> = RefCell::new(
       LruCache::new(NonZeroUsize::new(4096).unwrap())
     );
+
+    // Large (whole-cluster) reads keyed by exact range. Video and audio passes request
+    // the same clusters, so the second pass reuses the first's fetch instead of
+    // re-downloading. Small: only the in-flight buffer window of clusters.
+    static CLUSTER_CACHE: RefCell<LruCache<String, Box<[u8]>>> = RefCell::new(
+      LruCache::new(NonZeroUsize::new(32).unwrap())
+    );
 }
 
 #[derive(Clone)]
@@ -102,6 +109,20 @@ fn seed_cache(url: &str, abs_start: u64, data: &[u8]) {
         });
         off += BLOCK;
     }
+}
+
+/// Whole-cluster read with an exact-range cache, so the audio pass reuses the
+/// cluster bytes the video pass already fetched (and vice versa).
+async fn read_large_cached(url: &str, start: Size, end: Size) -> Vec<u8> {
+    let key = format!("{}-{}-{}", url, start, end);
+    if let Some(hit) = CLUSTER_CACHE.with(|c| c.borrow_mut().get(&key).map(|v| v.to_vec())) {
+        return hit;
+    }
+    let data = read_range(url, start, end).await;
+    if !data.is_empty() {
+        CLUSTER_CACHE.with(|c| c.borrow_mut().put(key, data.clone().into_boxed_slice()));
+    }
+    data
 }
 
 async fn read_range(url: &str, start: Size, end: Size) -> Vec<u8> {
@@ -220,18 +241,19 @@ impl EbmlSource for FetchSource {
 
     async fn read_range(&self, start: Size, end: Size) -> Vec<u8> {
         let size = end - start;
-        if size > 10_000 {
-            read_range(&self.url, start, end).await
+        if size > BLOCK {
+            read_large_cached(&self.url, start, end).await
         } else {
             read_cache_entry(&self.url, start, end).await
         }
     }
 
     async fn read_exact(&self, start: Size, length: usize) -> Vec<u8> {
-        if length > 10_000 {
-            read_range(&self.url, start, start + length as u64 - 1).await
+        let end = start + length as u64 - 1;
+        if length as u64 > BLOCK {
+            read_large_cached(&self.url, start, end).await
         } else {
-            read_cache_entry(&self.url, start, start + length as u64 - 1).await
+            read_cache_entry(&self.url, start, end).await
         }
     }
 
