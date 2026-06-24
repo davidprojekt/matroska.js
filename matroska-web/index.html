@@ -77,6 +77,52 @@
         #drop .fname { color: var(--text); font-family: var(--mono); }
         #drop b { color: var(--accent); }
 
+        .intake-or {
+            flex: 0 0 auto;
+            color: var(--text-dim);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+        }
+
+        #url-form {
+            flex: 1 1 auto;
+            display: flex;
+            gap: 8px;
+            min-width: 0;
+            margin: 0;
+        }
+        #url {
+            flex: 1 1 auto;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-elev-2);
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 12.5px;
+            outline: none;
+            transition: border-color .15s;
+        }
+        #url::placeholder { color: var(--text-dim); }
+        #url:focus { border-color: var(--accent); }
+        #url-form button {
+            flex: 0 0 auto;
+            padding: 0 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-family: var(--sans);
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: border-color .15s, background .15s;
+        }
+        #url-form button:hover { border-color: var(--accent); }
+        #url-form button:disabled { opacity: .5; cursor: default; }
+
         /* ---------- metadata strip ---------- */
         #summary {
             flex: 0 0 auto;
@@ -215,6 +261,30 @@
         }
         .loadmore:hover { text-decoration: underline; }
 
+        /* ---------- SeekHead navigation ---------- */
+        .node .seek-target { color: var(--amber); }
+        .jumpbtn {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--accent);
+            background: var(--accent-soft);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 0 7px;
+            line-height: 1.7;
+            flex: 0 0 auto;
+        }
+        .jumpbtn:hover { border-color: var(--accent); }
+        .jump-result {
+            margin-left: 18px;
+            border-left: 1px solid var(--accent-soft);
+        }
+        .node.jumped { border-left-color: var(--amber); }
+        .jump-status { color: var(--text-dim); font-family: var(--mono); font-size: 11.5px; padding-left: 30px; }
+        .jump-status.err { color: var(--amber); }
+        .node.jump-flash { background: var(--accent-soft); transition: background .3s; }
+
         /* ---------- hex ---------- */
         .hex-head {
             flex: 0 0 auto;
@@ -273,6 +343,11 @@
             <span class="prompt">Drop a video file here, or <b>browse</b> &mdash; nothing is uploaded</span>
             <input id="file" type="file" accept="video/*,.mkv,.webm,.mka,.mks" hidden />
         </label>
+        <span class="intake-or">or</span>
+        <form id="url-form">
+            <input id="url" type="url" placeholder="paste a video URL…" autocomplete="off" spellcheck="false" />
+            <button type="submit">Load</button>
+        </form>
     </header>
 
     <section id="summary"></section>
@@ -321,6 +396,10 @@
             SamplingFrequency: 'b5',
             Channels: '9f',
             Cluster: '1f43b675',
+            SeekHead: '114d9b74',
+            Seek: '4dbb',
+            SeekID: '53ab',
+            SeekPosition: '53ac',
         };
 
         const TRACK_TYPE = { 1: 'video', 2: 'audio', 3: 'complex', 16: 'logo', 17: 'subtitle', 18: 'button', 32: 'control', 33: 'metadata' };
@@ -333,15 +412,71 @@
         const id0x = (el) => '0x' + el.get_id().toString(16).toUpperCase();
 
         let wasmReady = init();
-        let currentFile = null;     // the selected File (for hex slicing)
+        let currentSource = null;   // { name, size, ebmlUrl, readBytes(off,len) } — see *Source builders
         let selectedNode = null;
+        // Absolute file offset of the Segment's payload start. SeekPosition values are relative to
+        // THIS, not the file start, so jumps need it. Set in load(), reset per load.
+        let segmentDataStart = null;
 
-        // ---------- file intake ----------
+        // ---------- source builders ----------
+        // A "source" abstracts where bytes come from: a local File (sliced directly) or a remote
+        // URL (read via HTTP Range requests). `ebmlUrl` is what the wasm reader fetches; `readBytes`
+        // backs the hex pane and the float decoder.
+        function fileSource(file) {
+            // a blob URL lets the wasm reader Range-serve the LOCAL file without an upload
+            const ebmlUrl = URL.createObjectURL(file);
+            return {
+                name: file.name,
+                size: file.size,
+                ebmlUrl,
+                readBytes: (off, len) => file.slice(off, off + len).arrayBuffer(),
+            };
+        }
+
+        async function urlSource(url) {
+            let name = url, size = 0;
+            try { name = decodeURIComponent(new URL(url).pathname.split('/').pop()) || url; } catch (_) {}
+
+            // A HEAD gives the total length up front. We deliberately do NOT do a GET range-probe:
+            // if the server ignores Range and answers 200, an unread/uncancelled response body would
+            // stream the WHOLE file in the background. Size is instead filled in lazily below from the
+            // Content-Range of the first real ranged read (whose body we always consume).
+            try {
+                const head = await fetch(url, { method: 'HEAD' });
+                size = Number(head.headers.get('Content-Length')) || 0;
+            } catch (_) { /* size stays 0 until the first ranged read fills it in */ }
+
+            return {
+                name,
+                get size() { return size; },
+                ebmlUrl: url,
+                async readBytes(off, len) {
+                    const r = await fetch(url, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
+                    if (r.status !== 206) {
+                        // Server ignored the Range (200 = whole file). Cancel the body so it is NOT
+                        // downloaded in the background, then surface the misbehaviour.
+                        r.body?.cancel?.();
+                        throw new Error(`expected "206 Partial Content" but got ${r.status} — the ` +
+                            `server is ignoring Range requests and would send the whole file`);
+                    }
+                    if (!size) {
+                        const cr = r.headers.get('Content-Range');  // "bytes 0-1023/4506488235"
+                        const m = cr && cr.match(/\/(\d+)\s*$/);
+                        if (m) size = Number(m[1]);
+                    }
+                    return r.arrayBuffer();
+                },
+            };
+        }
+
+        // ---------- intake ----------
         const drop = $('#drop');
         const fileInput = $('#file');
+        const urlForm = $('#url-form');
+        const urlInput = $('#url');
 
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files && e.target.files[0]) loadFile(e.target.files[0]);
+            if (e.target.files && e.target.files[0]) load(fileSource(e.target.files[0]));
         });
         ['dragenter', 'dragover'].forEach(ev =>
             drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('drag'); }));
@@ -349,15 +484,37 @@
             drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('drag'); }));
         drop.addEventListener('drop', (e) => {
             const f = e.dataTransfer?.files?.[0];
-            if (f) loadFile(f);
+            if (f) { load(fileSource(f)); return; }
+            const u = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
+            if (u) { urlInput.value = u.trim(); loadFromUrl(); }
         });
 
-        async function loadFile(file) {
-            currentFile = file;
+        urlForm.addEventListener('submit', (e) => { e.preventDefault(); loadFromUrl(); });
+
+        async function loadFromUrl() {
+            const url = urlInput.value.trim();
+            if (!url) return;
+            const btn = urlForm.querySelector('button');
+            btn.disabled = true;
+            try {
+                await load(await urlSource(url));
+            } catch (err) {
+                console.warn('failed to load URL', err);
+                showLoadError(`Could not load that URL — ${err.message || err}. The server must allow ` +
+                    `cross-origin (CORS) Range requests.`);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function load(source) {
+            currentSource = source;
             drop.querySelector('.prompt').innerHTML =
-                `<span class="fname">${escapeHtml(file.name)}</span> &mdash; ${fmtBytes(file.size)}`;
+                `<span class="fname">${escapeHtml(source.name)}</span>` +
+                (source.size ? ` &mdash; ${fmtBytes(source.size)}` : '');
 
             // reset UI
+            segmentDataStart = null;
             $('#tree-placeholder').hidden = true;
             const tree = $('#tree');
             tree.hidden = false;
@@ -368,28 +525,41 @@
 
             await wasmReady;
 
-            // push the LOCAL file into the library via a blob URL (Range-served by the browser)
-            const blobUrl = URL.createObjectURL(file);
-
             // The wasm reader is a forward-only stream: get_payload() drains its element. So use
             // ONE reader for the interactive tree (kept un-consumed until the user expands nodes)
             // and a SEPARATE reader for the up-front metadata scan.
-            const treeReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(blobUrl));
+            const treeReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(source.ebmlUrl));
             const headDoc = await treeReader.next();   // EBML header
             const bodyDoc = await treeReader.next();   // Segment
+
+            // SeekPositions are relative to the Segment's payload start; cache it for jumps.
+            if (bodyDoc && idHex(bodyDoc) === ID.Segment) {
+                try {
+                    const segOff = Number(bodyDoc.get_offset());
+                    const head = new Uint8Array(await source.readBytes(segOff, 16));
+                    segmentDataStart = segOff + payloadStart(head);
+                } catch (err) { console.warn('could not resolve Segment data start', err); }
+            }
 
             tree.innerHTML = '';
             for (const el of [headDoc, bodyDoc].filter(Boolean)) renderNode(el, tree);
 
             // metadata scan walks its own reader up to the first Cluster
             try {
-                const metaReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(blobUrl));
+                const metaReader = EbmlReader.new_endless(BigInt(0), FetchSourceEbml.new(source.ebmlUrl));
                 await metaReader.next();                       // EBML header
                 const metaSegment = await metaReader.next();   // Segment
                 await scanMetadata(metaSegment);
             } catch (err) {
                 console.warn('metadata scan failed', err);
             }
+        }
+
+        function showLoadError(msg) {
+            $('#tree-placeholder').hidden = false;
+            $('#tree-placeholder').innerHTML =
+                `<h2>Load failed</h2><p>${escapeHtml(msg)}</p>`;
+            $('#tree').hidden = true;
         }
 
         // ---------- metadata ----------
@@ -508,6 +678,7 @@
 
             const node = document.createElement('div');
             node.className = 'node';
+            node.dataset.offset = String(off);   // lets a jump highlight an already-loaded node
             node.innerHTML =
                 `<span class="twisty${isMaster ? '' : ' leaf'}">▶</span>` +
                 `<span class="id">${id0x(el)}</span>` +
@@ -525,6 +696,11 @@
                 if (e.target === twisty) return;
                 selectNode(node, el);
             });
+
+            // SeekHead helpers: decode the binary SeekID, and turn each Seek into a jump target.
+            const hexId = idHex(el);
+            if (hexId === ID.SeekID) decodeSeekId(el, node);
+            else if (hexId === ID.Seek) enhanceSeek(el, li, node);
 
             if (isMaster) {
                 const childUl = document.createElement('ul');
@@ -565,9 +741,117 @@
             }
         }
 
-        function knownName(el) {
-            const id = idHex(el).toUpperCase();
-            const names = {
+        // ---------- SeekHead navigation ----------
+        // A SeekID/binary element's payload bytes ARE the target's EBML ID exactly as stored
+        // (Info = 15 49 A9 66), so hex-encoding them keys straight into EL_NAMES — no stripping.
+        async function readSeekIdHex(el) {
+            if (!currentSource) return null;
+            const off = Number(el.get_offset());
+            const size = Number(el.get_size());
+            const bytes = new Uint8Array(await currentSource.readBytes(off, size));
+            const payload = bytes.subarray(payloadStart(bytes));
+            if (!payload.length) return null;
+            return Array.from(payload, b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        }
+
+        // Append "= 0x1549A966 (Info)" to a SeekID row once its bytes are read (async, post-render).
+        async function decodeSeekId(el, node) {
+            try {
+                const hex = await readSeekIdHex(el);
+                if (!hex) return;
+                const name = EL_NAMES[hex];
+                const span = document.createElement('span');
+                span.className = 'val';
+                span.textContent = `= 0x${hex}${name ? ` (${name})` : ''}`;
+                node.insertBefore(span, node.querySelector('.size'));
+            } catch (err) { console.warn('SeekID decode failed', err); }
+        }
+
+        // Summarize a Seek as "→ Target [↪ jump]". Reads the Seek's children with a FRESH reader
+        // so it doesn't drain el's own payload (that would break the user's manual expand — see
+        // the load() comment). Seek masters are tiny and few, so the eager read is cheap.
+        async function enhanceSeek(el, li, node) {
+            if (!currentSource) return;
+            try {
+                const r = EbmlReader.new_endless(BigInt(Number(el.get_offset())), FetchSourceEbml.new(currentSource.ebmlUrl));
+                const seek = await r.next();
+                if (!seek) return;
+                const kids = seek.get_payload();
+                if (!kids || typeof kids.next !== 'function') return;
+
+                let targetHex = null, seekPos = null;
+                let k;
+                while ((k = await kids.next())) {
+                    const kid = idHex(k);
+                    if (kid === ID.SeekID) targetHex = await readSeekIdHex(k);
+                    else if (kid === ID.SeekPosition) seekPos = Number(k.get_payload());
+                }
+
+                const sizeSpan = node.querySelector('.size');
+                const targetName = (targetHex && EL_NAMES[targetHex]) || (targetHex ? `0x${targetHex}` : '?');
+                const summary = document.createElement('span');
+                summary.className = 'seek-target';
+                summary.textContent = `→ ${targetName}`;
+                node.insertBefore(summary, sizeSpan);
+
+                if (seekPos != null && segmentDataStart != null) {
+                    const absOffset = segmentDataStart + seekPos;
+                    const btn = document.createElement('button');
+                    btn.className = 'jumpbtn';
+                    btn.textContent = '↪ jump';
+                    btn.title = `Seek to file offset ${absOffset}`;
+                    btn.addEventListener('click', (ev) => { ev.stopPropagation(); jumpTo(absOffset, li); });
+                    node.insertBefore(btn, sizeSpan);
+                }
+            } catch (err) { console.warn('Seek enhance failed', err); }
+        }
+
+        // Random-access load of the element at absOffset, rendered as an expandable subtree under
+        // the Seek's <li>. Random access is essential: Cues/Tags/trailing SeekHeads live at EOF, so
+        // walking the sequential cursor there would stream every Cluster in between.
+        async function jumpTo(absOffset, li) {
+            if (!currentSource || segmentDataStart == null) return;
+
+            li.querySelector(':scope > ul.jump-result')?.remove();   // re-click = re-jump
+
+            const jumpUl = document.createElement('ul');
+            jumpUl.className = 'jump-result';
+            jumpUl.innerHTML = '<li class="node jump-status">jumping…</li>';
+            li.appendChild(jumpUl);
+
+            try {
+                const r = EbmlReader.new_endless(BigInt(absOffset), FetchSourceEbml.new(currentSource.ebmlUrl));
+                const target = await r.next();
+                jumpUl.innerHTML = '';
+                if (!target) {
+                    jumpUl.innerHTML = `<li class="node jump-status err">nothing readable at offset ${absOffset}</li>`;
+                    return;
+                }
+                renderNode(target, jumpUl);
+                const newNode = jumpUl.querySelector(':scope > li > .node');
+                if (newNode) {
+                    newNode.classList.add('jumped');
+                    newNode.scrollIntoView({ block: 'nearest' });
+                    selectNode(newNode, target);
+                }
+                // Best-effort: also flash an already-loaded node at the same offset in the main tree
+                // (skip the node we just created, which carries the same data-offset).
+                const existing = Array.from($('#tree').querySelectorAll(`[data-offset="${absOffset}"]`))
+                    .find(n => n !== newNode);
+                if (existing) {
+                    existing.classList.add('jump-flash');
+                    existing.scrollIntoView({ block: 'nearest' });
+                    setTimeout(() => existing.classList.remove('jump-flash'), 1200);
+                }
+            } catch (err) {
+                console.warn('jump failed', err);
+                jumpUl.innerHTML = `<li class="node jump-status err">jump failed — ${escapeHtml(String(err.message || err))}</li>`;
+            }
+        }
+
+        // Element ID (hex, uppercase) -> human name. Module-level so SeekID decoding and the
+        // Seek jump summary can reuse it, not just the tree's knownName().
+        const EL_NAMES = {
                 // EBML Header Elements (RFC 8794 — not in the Matroska schema)
                 '1A45DFA3': 'EBML',
                 '4286': 'EBMLVersion',
@@ -873,8 +1157,10 @@
                 '44B4': 'TagDefaultBogus',
                 '4487': 'TagString',
                 '4485': 'TagBinary'
-            };
-            return names[id] || '';
+        };
+
+        function knownName(el) {
+            return EL_NAMES[idHex(el).toUpperCase()] || '';
         }
 
         function inlineValue(el) {
@@ -907,7 +1193,7 @@
         }
 
         async function renderHex(el) {
-            if (!currentFile) return;
+            if (!currentSource) return;
             const off = Number(el.get_offset());
             const total = Number(el.get_size());
             const len = Math.min(total, HEX_CAP);
@@ -923,7 +1209,7 @@
             const hex = $('#hex');
             hex.innerHTML = '<div class="hex-empty">reading…</div>';
 
-            const buf = await currentFile.slice(off, off + len).arrayBuffer();
+            const buf = await currentSource.readBytes(off, len);
             hex.innerHTML = hexDump(new Uint8Array(buf), off);
             hex.scrollTop = 0;
         }
@@ -963,14 +1249,19 @@
             return len;
         }
 
+        // Where an element's payload begins within its raw bytes: past the ID vint + the size vint.
+        function payloadStart(bytes) {
+            return vintLen(bytes[0]) + vintLen(bytes[vintLen(bytes[0])]);
+        }
+
         // The wasm reader misdecodes Matroska floats (they are big-endian, 4 or 8 bytes),
         // so read the element's raw bytes from the file and decode the float ourselves.
         async function readBEFloat(el) {
-            if (!currentFile) return null;
+            if (!currentSource) return null;
             const off = Number(el.get_offset());
             const size = Number(el.get_size());
-            const bytes = new Uint8Array(await currentFile.slice(off, off + size).arrayBuffer());
-            const dataStart = vintLen(bytes[0]) + vintLen(bytes[vintLen(bytes[0])]);
+            const bytes = new Uint8Array(await currentSource.readBytes(off, size));
+            const dataStart = payloadStart(bytes);
             const dataLen = size - dataStart;
             const dv = new DataView(bytes.buffer, bytes.byteOffset + dataStart, dataLen);
             if (dataLen === 4) return dv.getFloat32(0, false);
@@ -981,7 +1272,7 @@
         // EBML elements may declare an "unknown size" (all-ones vint), surfacing as a value far
         // larger than the file; show that as ∞ rather than a nonsensical "65536 TB".
         function fmtElemSize(n) {
-            if (currentFile && n > currentFile.size) return '∞ unknown';
+            if (currentSource && currentSource.size && n > currentSource.size) return '∞ unknown';
             return fmtBytes(n);
         }
 
