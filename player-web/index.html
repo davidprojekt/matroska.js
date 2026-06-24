@@ -33,27 +33,75 @@
         padding: 0.75rem 1rem;
       }
       .panel label { font-size: 0.85rem; color: #bbb; display: flex; gap: 0.4rem; align-items: center; }
-      .panel input[type="text"] { width: 28rem; max-width: 60vw; background: #000; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 0.35rem 0.5rem; }
+
+      /* --- Enhanced URL Input Styling --- */
+      .panel input[type="text"] {
+        width: 28rem;
+        max-width: 60vw;
+        background: #0d0d0d;
+        color: #fff;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        padding: 0.45rem 0.6rem;
+        font-family: inherit;
+        font-size: 0.85rem;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        outline: none;
+      }
+      .panel input[type="text"]:focus {
+        border-color: #555;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
+        background: #050505;
+      }
+
+      /* --- Enhanced File Input Styling --- */
+      .panel input[type="file"] {
+        font-size: 0;
+        color: #aaa;
+        cursor: pointer;
+      }
+      /* Customizing the "Choose File" button inside the file input */
+      .panel input[type="file"]::file-selector-button {
+        background: #252525;
+        color: #eee;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        padding: 0.45rem 0.75rem;
+        margin-right: 0.5rem;
+        font-size: 0.85rem;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.2s, border-color 0.2s;
+      }
+      .panel input[type="file"]::file-selector-button:hover {
+        background: #303030;
+        border-color: #444;
+      }
+      .panel input[type="file"]::file-selector-button:active {
+        background: #1a1a1a;
+      }
+
       .panel select, .panel button { background: #000; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 0.35rem 0.5rem; }
       .panel button { cursor: pointer; }
       #status { font-size: 0.8rem; color: #8a8; min-height: 1em; width: min(100%, 1100px); white-space: pre-wrap; }
     </style>
   </head>
   <body>
-    <h1>matroska.js — MKV → fMP4 → MSE player (video.js v10)</h1>
+  <h1>matroska.js — MKV → fMP4 → MSE player (video.js v10)</h1>
 
-    <div class="panel">
-      <label>URL
-        <input id="url" type="text" value="http://localhost:8501/example/toaru.mkv" />
-      </label>
-      <button id="load">Load</button>
-      <label>Audio
-        <select id="audio"></select>
-      </label>
-      <label>Subtitles
-        <select id="subs"></select>
-      </label>
-    </div>
+  <div class="panel">
+    <input type="file" id="fileInput">
+    <label>URL
+      <input id="url" type="text" value="http://localhost:8501/example/toaru.mkv" />
+    </label>
+    <button id="load">Load</button>
+    <label>Audio
+      <select id="audio"></select>
+    </label>
+    <label>Subtitles
+      <select id="subs"></select>
+    </label>
+  </div>
 
     <div class="stage">
       <video-player>

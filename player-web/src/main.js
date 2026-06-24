@@ -2,8 +2,8 @@
 import '@videojs/html/video/skin';
 import '@videojs/html/video/skin.css';
 
-import initWasm, { MatroskaPlayer } from 'ebml-wasm';
-import { MseController } from './mse.js';
+import initWasm, {MatroskaPlayer} from 'ebml-wasm';
+import {MseController} from './mse.js';
 
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');
@@ -27,6 +27,13 @@ const status = (msg) => {
 let wasmReady = false;
 let controller = null;
 let subtitleObjectUrls = [];
+
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) {
+    const file = e.target.files[0];
+    url.value = URL.createObjectURL(file);
+  }
+});
 
 async function preflight(url) {
   // The remuxer relies on HTTP byte ranges (206) and, cross-origin, on CORS. Probe
