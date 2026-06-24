@@ -93,7 +93,7 @@ export class MseController {
     this.mediaSource = null;
     this.video$ = null; // { feeder, pump, track }
     this.audio$ = null;
-    this.bufferAheadMs = 20000;
+    this.bufferAheadMs = 5000;
     this.topUpQueued = false;
   }
 
