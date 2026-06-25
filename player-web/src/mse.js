@@ -94,6 +94,9 @@ export class MseController {
     this.video$ = null; // { feeder, pump, track }
     this.audio$ = null;
     this.bufferAheadMs = 5000;
+    // Smaller buffer required before playback can begin — keeps startup latency (and the
+    // up-front download) low, while steady-state still fills to bufferAheadMs.
+    this.startBufferMs = 1500;
     this.topUpQueued = false;
   }
 
@@ -116,7 +119,7 @@ export class MseController {
     this.video.addEventListener('seeking', () => this.onSeek());
     this.video.addEventListener('waiting', () => this.topUp());
 
-    await this.topUp();
+    await this.topUp(this.startBufferMs);
   }
 
   setupTrack(track) {
@@ -146,12 +149,12 @@ export class MseController {
     return currentMs;
   }
 
-  async topUp() {
+  async topUp(aheadMs = this.bufferAheadMs) {
     if (this.topUpQueued) return;
     this.topUpQueued = true;
     try {
       const currentMs = this.video.currentTime * 1000;
-      const targetMs = currentMs + this.bufferAheadMs;
+      const targetMs = currentMs + aheadMs;
       for (const stream of [this.video$, this.audio$]) {
         if (!stream) continue;
         let guard = 0;
