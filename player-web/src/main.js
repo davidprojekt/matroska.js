@@ -9,6 +9,7 @@ import {addTorrent, streamUrlFor} from './torrent.js';
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');
 const loadBtn = document.getElementById('load');
+const copyBtn = document.getElementById('copy');
 const audioSelect = document.getElementById('audio');
 const subsSelect = document.getElementById('subs');
 const video = document.querySelector('video-player video');
@@ -37,8 +38,15 @@ let subtitleObjectUrls = [];
 fileInput.addEventListener('change', (e) => {
   if (e.target.files && e.target.files[0]) {
     const file = e.target.files[0];
-    url.value = URL.createObjectURL(file);
+    urlInput.value = URL.createObjectURL(file);
   }
+});
+
+copyBtn.addEventListener('click', () => {
+  let hash = btoa(urlInput.value);
+  let hashedUrl = new URL(window.location.href);
+  hashedUrl.hash = '#' + hash;
+  navigator.clipboard.writeText(hashedUrl.href);
 });
 
 const hash = window.location.hash.substring(1);
