@@ -618,17 +618,17 @@ fn json_escape(s: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 mod wasm {
     use super::*;
-    use crate::fetch_source::FetchSource;
+    use crate::stream_source::StreamSource;
     use crate::matroska_data::element_id_type_map;
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]
-    pub struct MatroskaPlayer(Demuxer<FetchSource>);
+    pub struct MatroskaPlayer(Demuxer<StreamSource>);
 
     #[wasm_bindgen]
     impl MatroskaPlayer {
         pub async fn open(url: String) -> MatroskaPlayer {
-            let source = FetchSource::new(url);
+            let source = StreamSource::new(url);
             source.prefetch().await;
             let ebml = Ebml::new(source, element_id_type_map());
             MatroskaPlayer(Demuxer::open(ebml).await)

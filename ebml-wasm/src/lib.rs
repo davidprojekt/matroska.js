@@ -1,4 +1,5 @@
 pub mod fetch_source;
+pub mod stream_source;
 pub mod ebml;
 pub mod matroska_data;
 pub mod fs_source;

@@ -54,10 +54,12 @@ dependencies = [
  "ebml-spec",
  "futures",
  "gloo-net",
+ "js-sys",
  "lru",
  "pollster",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
