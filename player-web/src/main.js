@@ -35,6 +35,16 @@ fileInput.addEventListener('change', (e) => {
   }
 });
 
+const hash = window.location.hash.substring(1);
+
+if (hash) {
+    try {
+        url.value = atob(hash);
+    } catch (e) {
+        console.error("The hash is not a valid Base64 encoded string:", e);
+    }
+}
+
 async function preflight(url) {
   // The remuxer relies on HTTP byte ranges (206) and, cross-origin, on CORS. Probe
   // up front so a server that lacks them produces a clear message, not silent empty.
@@ -196,7 +206,9 @@ loadBtn.addEventListener('click', () => {
 });
 
 // Auto-load the default URL on startup.
-load(urlInput.value.trim()).catch((e) => {
-  console.error(e);
-  status('Error: ' + e.message + ' (is the file server running on :8501?)');
-});
+if(urlInput.value.trim().length !== 0) {
+  load(urlInput.value.trim()).catch((e) => {
+    console.error(e);
+    status('Error: ' + e.message + ' (is the file server running?)');
+  });
+}
