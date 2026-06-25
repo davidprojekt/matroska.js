@@ -1,9 +1,7 @@
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::cmp::min;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
-use std::ops::{Deref, DerefMut};
-use cache_rs::config::LfuCacheConfig;
-use cache_rs::{LfuCache, SIZE_UNIT};
 use gloo_net::http::Request;
 use lru::LruCache;
 use crate::ebml::{EbmlSource, Size};
@@ -11,6 +9,29 @@ use crate::ebml::{EbmlSource, Size};
 /// Cache/fetch granularity. Larger blocks mean far fewer HTTP round-trips when the
 /// EBML reader makes many small adjacent reads (vint headers, cluster headers).
 const BLOCK: u64 = 16_384;
+
+/// Read-ahead tuning. On *sequential* access we fetch a window that grows with each
+/// consecutive hit, so a long forward scan (the header parse, a cluster walk) costs a
+/// handful of requests instead of one per block. The skipped "gap" bytes between two
+/// nearby reads are pulled once inside the window and cached, so the second read is a
+/// cache hit rather than a fresh request — i.e. we "stream over" small gaps.
+const WINDOW_BASE: u64 = 64 * 1024;
+/// Upper bound on a single read-ahead fetch. This is what stops us from streaming over
+/// half the file when only a small region (e.g. the tail Cues) is actually needed.
+const WINDOW_CAP: u64 = 4 * 1024 * 1024;
+/// Largest forward gap from the last fetched byte still treated as "sequential". A jump
+/// bigger than this is a seek: we drop the read-ahead window and make a fresh, tight
+/// request rather than wastefully streaming across the gap.
+const SEQ_GAP: u64 = 512 * 1024;
+
+/// Per-URL read-ahead state driving the windowing heuristic.
+#[derive(Clone, Copy)]
+struct ReadAhead {
+    /// Absolute offset just past the last byte we fetched (the "stream head").
+    last_end: u64,
+    /// Window size to use for the next sequential fetch.
+    window: u64,
+}
 
 thread_local! {
     // 16 KB blocks × 4096 entries ≈ 64 MB cap.
@@ -24,6 +45,39 @@ thread_local! {
     static CLUSTER_CACHE: RefCell<LruCache<String, Box<[u8]>>> = RefCell::new(
       LruCache::new(NonZeroUsize::new(32).unwrap())
     );
+
+    // Tracks the forward read position per URL so adjacent reads can be coalesced into
+    // a single growing fetch instead of one request per block.
+    static READ_AHEAD: RefCell<HashMap<String, ReadAhead>> = RefCell::new(HashMap::new());
+}
+
+fn read_ahead_get(url: &str) -> ReadAhead {
+    READ_AHEAD.with(|m| {
+        m.borrow()
+            .get(url)
+            .copied()
+            .unwrap_or(ReadAhead { last_end: 0, window: WINDOW_BASE })
+    })
+}
+
+fn read_ahead_set(url: &str, state: ReadAhead) {
+    READ_AHEAD.with(|m| {
+        m.borrow_mut().insert(url.to_string(), state);
+    });
+}
+
+/// Advance the stream head after a whole-cluster read, so a small read that immediately
+/// follows it (the next cluster's header) still counts as sequential. The window is reset
+/// to a single block: a cluster read ends any small-read streak, and the header peek that
+/// follows sits right in front of *another* large read — reading ahead there would just
+/// re-download bytes the upcoming cluster fetch already covers.
+fn note_fetched(url: &str, end_exclusive: u64) {
+    let mut state = read_ahead_get(url);
+    state.window = BLOCK;
+    if end_exclusive > state.last_end {
+        state.last_end = end_exclusive;
+    }
+    read_ahead_set(url, state);
 }
 
 #[derive(Clone)]
@@ -93,8 +147,8 @@ fn parse_content_range_start(header: &str) -> Option<u64> {
     range.split('-').next()?.trim().parse().ok()
 }
 
-/// Seed the 1 KB block LRU with `data` that begins at absolute offset `abs_start`.
-/// Only blocks aligned to the cache's 1024-byte grid are stored; a partial leading
+/// Seed the block LRU with `data` that begins at absolute offset `abs_start`.
+/// Only blocks aligned to the cache's `BLOCK`-byte grid are stored; a partial leading
 /// region (when `abs_start` is unaligned) is left for the normal read path to fetch.
 fn seed_cache(url: &str, abs_start: u64, data: &[u8]) {
     let end = abs_start + data.len() as u64;
@@ -121,6 +175,9 @@ async fn read_large_cached(url: &str, start: Size, end: Size) -> Vec<u8> {
     let data = read_range(url, start, end).await;
     if !data.is_empty() {
         CLUSTER_CACHE.with(|c| c.borrow_mut().put(key, data.clone().into_boxed_slice()));
+        // Keep the stream head in sync so a small read right after this cluster (the next
+        // cluster's header) is still recognised as sequential.
+        note_fetched(url, start + data.len() as u64);
     }
     data
 }
@@ -153,87 +210,86 @@ fn read_cache_direct(url: &str, key: u64) -> Option<Box<[u8]>> {
     value
 }
 
+/// Whether a block is cached, without bumping its LRU recency (used for gap detection).
+fn read_cache_contains(url: &str, key: u64) -> bool {
+    READ_CACHE.with(|cache| cache.borrow().contains(format!("{}-{}", url, key).as_str()))
+}
+
+/// Read a small range through the block cache. On a miss, fetch a *read-ahead window*
+/// rather than just the missing block(s): sequential scans then download in a few large,
+/// growing chunks instead of one request per 16 KB. A seek (backward, or a forward jump
+/// larger than `SEQ_GAP`) resets the window so we never stream across a big gap.
 async fn read_cache_entry(url: &str, start: Size, end: Size) -> Vec<u8> {
     let quotient_start = start / BLOCK;
-    let remainder_start = (start % BLOCK) as usize;
-
     let quotient_end = end / BLOCK;
-    let remainder_end = (end % BLOCK) as usize;
 
-    let mut result: Vec<u8> = Vec::new();
-
-    let mut fetch_start: Option<Size> = None;
-    let mut fetch_end: Option<Size> = None;
-
+    // Find the contiguous span of missing blocks within the request (at most two blocks,
+    // since callers only take this path for reads up to BLOCK bytes).
+    let mut miss_lo: Option<u64> = None;
+    let mut miss_hi: Option<u64> = None;
     for quotient in quotient_start..=quotient_end {
-        let key = quotient * BLOCK;
-        let value = read_cache_direct(url, key);
-
-        if let Some(value) = value {
-            if let Some(some_fetch_start) = fetch_start && let Some(some_fetch_end) = fetch_end {
-                let mut data = read_range(url, some_fetch_start, some_fetch_end).await;
-
-                result.append(&mut data);
-
-                fetch_start = None;
-                fetch_end = None;
+        if !read_cache_contains(url, quotient * BLOCK) {
+            if miss_lo.is_none() {
+                miss_lo = Some(quotient);
             }
-
-            result.extend(value);
-        } else {
-            if fetch_start.is_none() {
-                fetch_start = Some(quotient * BLOCK);
-            }
-            fetch_end = Some((quotient + 1) * BLOCK - 1);
+            miss_hi = Some(quotient);
         }
     }
 
-    if let Some(some_fetch_start) = fetch_start && let Some(some_fetch_end) = fetch_end {
-        let mut data = read_range(url, some_fetch_start, some_fetch_end).await;
+    if let (Some(lo), Some(hi)) = (miss_lo, miss_hi) {
+        let needed_start = lo * BLOCK;
+        let needed_end = (hi + 1) * BLOCK - 1;
 
-        result.append(&mut data);
+        // Sequential iff the missing region continues roughly where the last fetch ended:
+        // within `SEQ_GAP` ahead, tolerating up to one block of overlap behind (a read at a
+        // cluster boundary lands in the block that *starts* just before `last_end`).
+        // Anything else is a seek and falls back to a tight, base-sized window.
+        let state = read_ahead_get(url);
+        let sequential = needed_start + BLOCK >= state.last_end
+            && needed_start <= state.last_end + SEQ_GAP;
+        let window = if sequential { state.window } else { WINDOW_BASE };
 
-        fetch_start = None;
-        fetch_end = None;
+        // Read ahead up to `window`, but always at least the bytes actually needed. Align
+        // the tail to the block grid so every cached block stays full-sized.
+        let mut fetch_end = needed_end.max(needed_start + window - 1);
+        fetch_end = (fetch_end / BLOCK + 1) * BLOCK - 1;
+
+        let data = read_range(url, needed_start, fetch_end).await;
+        if !data.is_empty() {
+            // `needed_start` is block-aligned, so this seeds whole blocks (the trailing one
+            // may be short at EOF, which the assembly step below clamps for).
+            seed_cache(url, needed_start, &data);
+        }
+
+        let covered_end = needed_start + data.len() as u64;
+        read_ahead_set(
+            url,
+            ReadAhead {
+                last_end: covered_end.max(state.last_end),
+                window: min(window.saturating_mul(2), WINDOW_CAP),
+            },
+        );
     }
 
-    for quotient in quotient_start..=quotient_end {
-        let key = quotient * BLOCK;
-
-        let slice_start = quotient * BLOCK;
-        let slice_end = (quotient + 1) * BLOCK - 1;
-
-        let start_range = (slice_start - (quotient_start * BLOCK)) as usize;
-        let end_range = ((slice_end - (quotient_start * BLOCK))) as usize;
-
-        let end_range = min(end_range, result.len() - 1);
-
-        if result.len() == 0 {
+    // Assemble the requested range from the (now populated) cache, clamping at EOF / short
+    // trailing blocks so a read past the end of file returns what exists instead of panicking.
+    let mut result: Vec<u8> = Vec::with_capacity((end - start + 1) as usize);
+    let mut off = start;
+    while off <= end {
+        let block_key = (off / BLOCK) * BLOCK;
+        let Some(block) = read_cache_direct(url, block_key) else {
+            break;
+        };
+        let inner = (off - block_key) as usize;
+        if inner >= block.len() {
             break;
         }
-
-        let slice = result[start_range..=end_range].to_vec().into_boxed_slice();
-
-        READ_CACHE.with(|cache| {
-            cache.borrow_mut().put(
-                format!("{}-{}", url, key),
-                slice,
-            )
-        });
+        let take = min((end - off + 1) as usize, block.len() - inner);
+        result.extend_from_slice(&block[inner..inner + take]);
+        off += take as u64;
     }
 
-    let end_range = ((quotient_end - quotient_start) * BLOCK) as usize + remainder_end;
-    let end_range = min(end_range, result.len() - 1);
-
-    // web_sys::console::log_1(&format!("{} - {}, Result: {:?}", remainder_start, end_range, result[remainder_start..=end_range].to_vec()).into());
-
-    if result.len() == 0 {
-        return result;
-    }
-
-    // web_sys::console::log_1(&format!("READ: {} - {} = {:?}", start, end, result[remainder_start..=end_range].to_vec()).into());
-
-    result[remainder_start..=end_range].to_vec()
+    result
 }
 
 
