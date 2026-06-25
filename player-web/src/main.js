@@ -4,6 +4,7 @@ import '@videojs/html/video/skin.css';
 
 import initWasm, {MatroskaPlayer} from 'ebml-wasm';
 import {MseController} from './mse.js';
+import {addTorrent, streamUrlFor} from './torrent.js';
 
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');
@@ -11,6 +12,11 @@ const loadBtn = document.getElementById('load');
 const audioSelect = document.getElementById('audio');
 const subsSelect = document.getElementById('subs');
 const video = document.querySelector('video-player video');
+const magnetInput = document.getElementById('magnet');
+const torrentFileInput = document.getElementById('torrentFile');
+const fetchTorrentBtn = document.getElementById('fetchTorrent');
+const torrentFilesLabel = document.getElementById('torrentFilesLabel');
+const torrentFilesSelect = document.getElementById('torrentFiles');
 
 // Subtitle codecs we can turn into WebVTT today (ASS/SSA need libass — out of scope).
 const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']);
@@ -64,14 +70,16 @@ async function preflight(url) {
   }
 }
 
-async function load(url) {
+async function load(url, { skipPreflight = false } = {}) {
   status(`Opening ${url} …`);
   if (!wasmReady) {
     await initWasm();
     wasmReady = true;
   }
 
-  await preflight(url);
+  // The WebTorrent service-worker stream URL already supports byte ranges, and probing
+  // it can stall while pieces are still arriving — so skip the preflight for that path.
+  if (!skipPreflight) await preflight(url);
 
   // Tear down any previous session.
   if (controller) {
@@ -200,6 +208,89 @@ audioSelect.addEventListener('change', () => {
 
 loadBtn.addEventListener('click', () => {
   load(urlInput.value.trim()).catch((e) => {
+    console.error(e);
+    status('Error: ' + e.message);
+  });
+});
+
+// --- WebTorrent: fetch metadata, then let the user pick one file to play ---
+
+const fmtSize = (bytes) => {
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0, n = bytes;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+};
+
+let torrentFiles = [];
+
+async function fetchTorrent() {
+  const file = torrentFileInput.files && torrentFileInput.files[0];
+  const source = file || magnetInput.value.trim();
+  if (!source) {
+    status('Paste a magnet link or choose a .torrent file first.');
+    return;
+  }
+
+  fetchTorrentBtn.disabled = true;
+  torrentFilesLabel.hidden = true;
+  torrentFilesSelect.innerHTML = '';
+  torrentFiles = [];
+
+  // Browser peers may be slow/absent — nudge the user instead of looking frozen.
+  const slowWarn = setTimeout(() => {
+    status('Still fetching metadata… no WebRTC peers yet. This torrent may not be web-seeded.');
+  }, 20000);
+
+  try {
+    const torrent = await addTorrent(source, status);
+    clearTimeout(slowWarn);
+    torrentFiles = torrent.files.slice();
+    if (!torrentFiles.length) {
+      status('Torrent has no files.');
+      return;
+    }
+
+    // Default the selection to the largest file (usually the video).
+    let largest = 0;
+    torrentFiles.forEach((f, i) => { if (f.length > torrentFiles[largest].length) largest = i; });
+
+    const hint = document.createElement('option');
+    hint.value = '';
+    hint.textContent = '— select a file —';
+    torrentFilesSelect.appendChild(hint);
+    torrentFiles.forEach((f, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = `${f.name} (${fmtSize(f.length)})`;
+      if (i === largest) opt.selected = true;
+      torrentFilesSelect.appendChild(opt);
+    });
+    torrentFilesLabel.hidden = false;
+    status(`Metadata ready: ${torrentFiles.length} file(s). Pick one to play.`);
+  } catch (e) {
+    clearTimeout(slowWarn);
+    console.error(e);
+    status('Torrent error: ' + e.message);
+  } finally {
+    fetchTorrentBtn.disabled = false;
+  }
+}
+
+fetchTorrentBtn.addEventListener('click', fetchTorrent);
+
+torrentFilesSelect.addEventListener('change', () => {
+  const value = torrentFilesSelect.value;
+  if (value === '') return;
+  const file = torrentFiles[Number(value)];
+  if (!file) return;
+  // streamURL is a root-relative path (/webtorrent/…); make it absolute so the WASM
+  // HTTP client gets the same shape it always has (it only sees absolute URLs). The
+  // service worker (scope '/') still serves it.
+  const streamUrl = new URL(streamUrlFor(file), location.origin).href;
+  urlInput.value = streamUrl; // reflect it in the URL box for visibility
+  status(`Streaming "${file.name}" from torrent…`);
+  load(streamUrl, { skipPreflight: true }).catch((e) => {
     console.error(e);
     status('Error: ' + e.message);
   });

@@ -5,7 +5,9 @@ export default defineConfig({
   // ebml-wasm out of esbuild's dep pre-bundling preserves that reference so Vite
   // emits the wasm as an asset correctly.
   optimizeDeps: {
-    exclude: ['ebml-wasm'],
+    // webtorrent is imported as its prebuilt browser bundle (dist/webtorrent.min.js),
+    // which already inlines its Buffer/process polyfills — let it pass through untouched.
+    exclude: ['ebml-wasm', 'webtorrent'],
   },
   server: {
     fs: {
