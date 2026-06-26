@@ -66,16 +66,15 @@ export class AssSubtitleController {
    * @param video HTMLVideoElement (drives timing/resize via requestVideoFrameCallback)
    *
    * We create a fresh canvas (JASSUB transfers it to an OffscreenCanvas, so it can't be
-   * reused on reload) and mount it into the video.js `media` slot, right after the
-   * <video>. That puts the overlay above the video but below the control bar, which the
-   * skin layers over the media slot in its shadow DOM. JASSUB then sizes/positions it to
-   * match the video (they share the slot's containing block).
+   * reused on reload) and mount it right after the <video> inside media-container. DOM
+   * order puts it above the video but below media-controls (which comes later in the
+   * markup), so the overlay sits under the control bar. JASSUB sizes/positions it to
+   * match the video (they share media-container as their containing block).
    */
   constructor(video) {
     this.video = video;
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'jassub-overlay'; // JASSUB sets size/position; CSS sets the rest
-    this.canvas.slot = 'media'; // same slot as the <video>, so it stacks under the controls
     this.canvas.style.display = 'none';
     video.insertAdjacentElement('afterend', this.canvas);
     this.instance = null;

@@ -24,6 +24,65 @@
       /* libass (JASSUB) overlay — created at runtime, sized/positioned by JASSUB over the
          video; pointer-events:none lets clicks through to the player controls. */
       .jassub-overlay { position: absolute; pointer-events: none; }
+
+      /* The skin's icon CSS targets inline <svg class="media-icon">, but our ejected markup
+         uses the <media-icon> wrapper element (renders the svg via innerHTML, defaults to
+         display:inline where width/height and the scale-based --flipped transform are
+         ignored). Give it a box so sizing and the seek-back flip work. */
+      media-icon { display: inline-flex; line-height: 0; }
+      media-icon > svg { width: 100%; height: 100%; }
+
+      /* The volume slider's parts don't receive `data-orientation` from the slider context
+         in this ejected/popover setup, so the skin's orientation-gated geometry never
+         applies (track has no size, thumb stuck). Set the vertical geometry explicitly;
+         --media-slider-fill is still updated by the slider JS as the volume changes. */
+      .media-default-skin .media-popover--volume .media-slider { width: 2rem; height: 5rem; }
+      .media-default-skin .media-popover--volume .media-slider__track { width: 0.25rem; height: 100%; }
+      .media-default-skin .media-popover--volume .media-slider__fill {
+        inset-inline: 0;
+        bottom: 0;
+        height: var(--media-slider-fill);
+      }
+      .media-default-skin .media-popover--volume .media-slider__thumb {
+        top: calc(100% - var(--media-slider-fill));
+        left: 50%;
+      }
+
+      /* Custom Audio/Subtitle dropdown menus in the control bar. */
+      .vjs-menu { position: relative; display: inline-flex; align-items: center; }
+      .vjs-menu__trigger { font-size: 0.8125rem; padding: 0 0.6rem; min-width: auto; }
+      .vjs-menu__popup {
+        position: absolute;
+        bottom: calc(100% + 0.5rem);
+        right: 0;
+        min-width: 12rem;
+        max-height: 16rem;
+        overflow-y: auto;
+        padding: 0.25rem;
+        border-radius: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        z-index: 30;
+      }
+      .vjs-menu__popup[hidden] { display: none; }
+      .vjs-menu__item {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+        background: transparent;
+        border: 0;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        padding: 0.4rem 0.6rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .vjs-menu__item::before { content: ""; display: inline-block; width: 1ch; flex: none; }
+      .vjs-menu__item[aria-checked="true"]::before { content: "✓"; }
+      .vjs-menu__item:hover:not([disabled]) { background: color-mix(in srgb, currentColor 14%, transparent); }
+      .vjs-menu__item[disabled] { opacity: 0.4; cursor: default; }
       .panel {
         width: min(100%, 1100px);
         display: flex;
@@ -117,19 +176,107 @@
     </label>
     <button id="load">Load</button>
     <button id="copy">Copy</button>
-    <label>Audio
-      <select id="audio"></select>
-    </label>
-    <label>Subtitles
-      <select id="subs"></select>
-    </label>
   </div>
 
     <div class="stage">
       <video-player>
-        <video-skin>
-          <video slot="media" playsinline crossorigin="anonymous"></video>
-        </video-skin>
+        <media-container class="media-default-skin media-default-skin--video">
+          <video playsinline crossorigin="anonymous"></video>
+
+          <media-buffering-indicator class="media-buffering-indicator">
+            <div class="media-surface">
+              <media-icon name="spinner" class="media-icon"></media-icon>
+            </div>
+          </media-buffering-indicator>
+
+          <media-controls class="media-surface media-controls">
+            <media-tooltip-group>
+              <div class="media-button-group">
+                <media-play-button commandfor="play-tooltip" class="media-button media-button--subtle media-button--icon media-button--play">
+                  <media-icon name="restart" class="media-icon media-icon--restart"></media-icon>
+                  <media-icon name="play" class="media-icon media-icon--play"></media-icon>
+                  <media-icon name="pause" class="media-icon media-icon--pause"></media-icon>
+                </media-play-button>
+                <media-tooltip id="play-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
+
+                <media-seek-button commandfor="seek-backward-tooltip" seconds="-10" class="media-button media-button--subtle media-button--icon media-button--seek">
+                  <span class="media-icon__container">
+                    <media-icon name="seek" class="media-icon media-icon--flipped"></media-icon>
+                    <span class="media-icon__label">10</span>
+                  </span>
+                </media-seek-button>
+                <media-tooltip id="seek-backward-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
+
+                <media-seek-button commandfor="seek-forward-tooltip" seconds="10" class="media-button media-button--subtle media-button--icon media-button--seek">
+                  <span class="media-icon__container">
+                    <media-icon name="seek" class="media-icon"></media-icon>
+                    <span class="media-icon__label">10</span>
+                  </span>
+                </media-seek-button>
+                <media-tooltip id="seek-forward-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
+              </div>
+
+              <div class="media-time-controls">
+                <media-time type="current" class="media-time"></media-time>
+                <media-time-slider class="media-slider">
+                  <media-slider-track class="media-slider__track">
+                    <media-slider-fill class="media-slider__fill"></media-slider-fill>
+                    <media-slider-buffer class="media-slider__buffer"></media-slider-buffer>
+                  </media-slider-track>
+                  <media-slider-thumb class="media-slider__thumb"></media-slider-thumb>
+                </media-time-slider>
+                <media-time type="duration" class="media-time"></media-time>
+              </div>
+
+              <div class="media-button-group">
+                <!-- Audio track menu (custom, app-driven) -->
+                <div class="vjs-menu">
+                  <button type="button" id="audioTrigger" class="media-button media-button--subtle vjs-menu__trigger" aria-haspopup="true" aria-expanded="false" title="Audio track" hidden>Audio</button>
+                  <div id="audioMenu" class="media-surface vjs-menu__popup" role="menu" hidden></div>
+                </div>
+                <!-- Subtitle track menu (custom, app-driven) -->
+                <div class="vjs-menu">
+                  <button type="button" id="subsTrigger" class="media-button media-button--subtle vjs-menu__trigger" aria-haspopup="true" aria-expanded="false" title="Subtitles" hidden>Subs</button>
+                  <div id="subsMenu" class="media-surface vjs-menu__popup" role="menu" hidden></div>
+                </div>
+
+                <media-mute-button commandfor="video-volume-popover" class="media-button media-button--subtle media-button--icon media-button--mute">
+                  <media-icon name="volume-off" class="media-icon media-icon--volume-off"></media-icon>
+                  <media-icon name="volume-low" class="media-icon media-icon--volume-low"></media-icon>
+                  <media-icon name="volume-high" class="media-icon media-icon--volume-high"></media-icon>
+                </media-mute-button>
+                <media-popover id="video-volume-popover" open-on-hover delay="200" close-delay="100" side="top" class="media-surface media-popover media-popover--volume">
+                  <media-volume-slider class="media-slider" orientation="vertical" thumb-alignment="edge">
+                    <media-slider-track class="media-slider__track">
+                      <media-slider-fill class="media-slider__fill"></media-slider-fill>
+                    </media-slider-track>
+                    <media-slider-thumb class="media-slider__thumb media-slider__thumb--persistent"></media-slider-thumb>
+                  </media-volume-slider>
+                </media-popover>
+
+                <media-fullscreen-button commandfor="fullscreen-tooltip" class="media-button media-button--subtle media-button--icon media-button--fullscreen">
+                  <media-icon name="fullscreen-enter" class="media-icon media-icon--fullscreen-enter"></media-icon>
+                  <media-icon name="fullscreen-exit" class="media-icon media-icon--fullscreen-exit"></media-icon>
+                </media-fullscreen-button>
+                <media-tooltip id="fullscreen-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
+              </div>
+            </media-tooltip-group>
+          </media-controls>
+
+          <div class="media-overlay"></div>
+
+          <media-hotkey keys="Space" action="togglePaused"></media-hotkey>
+          <media-hotkey keys="k" action="togglePaused"></media-hotkey>
+          <media-hotkey keys="m" action="toggleMuted"></media-hotkey>
+          <media-hotkey keys="f" action="toggleFullscreen"></media-hotkey>
+          <media-hotkey keys="ArrowRight" action="seekStep" value="5"></media-hotkey>
+          <media-hotkey keys="ArrowLeft" action="seekStep" value="-5"></media-hotkey>
+          <media-hotkey keys="ArrowUp" action="volumeStep" value="0.05"></media-hotkey>
+          <media-hotkey keys="ArrowDown" action="volumeStep" value="-0.05"></media-hotkey>
+
+          <media-gesture type="tap" action="togglePaused" pointer="mouse" region="center"></media-gesture>
+          <media-gesture type="doubletap" action="toggleFullscreen" region="center"></media-gesture>
+        </media-container>
       </video-player>
     </div>
 

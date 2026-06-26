@@ -1,19 +1,33 @@
-// video.js v10 player UI (registers <video-player>, <video-skin> and all controls).
+// video.js v10 player UI (registers <video-player>, <media-container> and all controls).
 import '@videojs/html/video/skin';
 import '@videojs/html/video/skin.css';
+// The skin inlines its own SVGs, but our ejected markup uses <media-icon name="…">,
+// which needs the element defined and the default icon set registered.
+import '@videojs/html/icons/element/default';
 
 import initWasm, {MatroskaPlayer} from 'ebml-wasm';
 import {MseController} from './mse.js';
 import {AssSubtitleController} from './subtitles.js';
+import {TrackMenu} from './menu.js';
 import {addTorrent, streamUrlFor} from './torrent.js';
 
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');
 const loadBtn = document.getElementById('load');
 const copyBtn = document.getElementById('copy');
-const audioSelect = document.getElementById('audio');
-const subsSelect = document.getElementById('subs');
 const video = document.querySelector('video-player video');
+
+// Audio + subtitle selection live in the control bar (see index.html), not in <select>s.
+const audioMenu = new TrackMenu(
+  document.getElementById('audioTrigger'),
+  document.getElementById('audioMenu'),
+  (v) => onAudioSelect(Number(v))
+);
+const subsMenu = new TrackMenu(
+  document.getElementById('subsTrigger'),
+  document.getElementById('subsMenu'),
+  (v) => onSubSelect(v)
+);
 const magnetInput = document.getElementById('magnet');
 const torrentFileInput = document.getElementById('torrentFile');
 const fetchTorrentBtn = document.getElementById('fetchTorrent');
@@ -118,8 +132,10 @@ async function load(url, { skipPreflight = false } = {}) {
     assSubs = null;
   }
   for (const t of [...video.querySelectorAll('track')]) t.remove();
-  audioSelect.innerHTML = '';
-  subsSelect.innerHTML = '';
+  audioMenu.setItems([]);
+  audioMenu.setAvailable(false);
+  subsMenu.setItems([]);
+  subsMenu.setAvailable(false);
 
   const player = await MatroskaPlayer.open(url);
   activePlayer = player;
@@ -140,33 +156,32 @@ async function load(url, { skipPreflight = false } = {}) {
   const defaultAudio = audioTracks.find((t) => t.default && supported(t)) || audioTracks.find(supported) || null;
 
   // Audio track menu (v10 has no audio-track feature, so this is custom).
-  for (const t of audioTracks) {
-    const opt = document.createElement('option');
-    opt.value = String(t.number);
-    const tag = supported(t) ? '' : ' [unsupported]';
-    opt.textContent = `${t.language || '??'} — ${t.name || t.codec_id}${tag}`;
-    opt.disabled = !supported(t);
-    if (t === defaultAudio) opt.selected = true;
-    audioSelect.appendChild(opt);
-  }
+  audioMenu.setItems(
+    audioTracks.map((t) => ({
+      value: String(t.number),
+      label: `${t.language || '??'} — ${t.name || t.codec_id}${supported(t) ? '' : ' [unsupported]'}`,
+      disabled: !supported(t),
+      selected: t === defaultAudio,
+    }))
+  );
+  audioMenu.setAvailable(audioTracks.length > 0);
 
-  // ASS tracks render via libass; plain text is lazily extracted to WebVTT on selection.
-  const offOpt = document.createElement('option');
-  offOpt.value = '';
-  offOpt.textContent = 'Off';
-  offOpt.selected = true;
-  subsSelect.appendChild(offOpt);
+  // ASS tracks render via libass. Plain-text subs are listed but disabled (the WebVTT
+  // path is not wired into the libass overlay yet).
+  const subItems = [{ value: '', label: 'Off', selected: true }];
   for (const t of subtitleTracks) {
     subtitleInfo.set(t.number, { language: t.language, name: t.name });
     const kind = subKind(t);
     if (kind) subKindByNumber.set(t.number, kind);
-    const opt = document.createElement('option');
-    opt.value = String(t.number);
-    opt.disabled = !kind;
-    const tag = kind ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
-    opt.textContent = `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`;
-    subsSelect.appendChild(opt);
+    const tag = kind === 'ass' ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
+    subItems.push({
+      value: String(t.number),
+      label: `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`,
+      disabled: kind !== 'ass', // only ASS is wired up for now
+    });
   }
+  subsMenu.setItems(subItems);
+  subsMenu.setAvailable(subtitleTracks.length > 0);
 
   controller = new MseController(player, video, tracks, durationMs, cueTimes);
   await controller.start(videoTrack, defaultAudio);
@@ -245,10 +260,17 @@ async function selectSubtitle(value) {
   }
 }
 
-subsSelect.addEventListener('change', () => {
+// Menu callbacks (wired in the TrackMenu instances near the top).
+function onAudioSelect(number) {
+  if (controller) controller.switchAudio(number);
+  const t = trackList.find((x) => x.number === number);
+  if (t) applyForcedSubtitle(t.language);
+}
+
+function onSubSelect(value) {
   userChoseSub = true; // explicit choice — forced-subtitle logic must not override it
-  selectSubtitle(subsSelect.value);
-});
+  selectSubtitle(value);
+}
 
 // Fetch font attachments out-of-band (one Range request each, parallel, on separate
 // connections) so they never contend with the single forward media stream, and hand the
@@ -300,7 +322,7 @@ function applyForcedSubtitle(audioLang) {
       langMatch(t.language, audioLang)
   );
   if (!forced) return;
-  subsSelect.value = String(forced.number);
+  subsMenu.setValue(String(forced.number));
   selectSubtitle(String(forced.number)); // programmatic — keep userChoseSub false
 }
 
@@ -310,13 +332,6 @@ function reportTracks(tracks) {
   );
   console.log('Tracks:\n' + lines.join('\n'));
 }
-
-audioSelect.addEventListener('change', () => {
-  const number = Number(audioSelect.value);
-  if (controller) controller.switchAudio(number);
-  const t = trackList.find((x) => x.number === number);
-  if (t) applyForcedSubtitle(t.language);
-});
 
 loadBtn.addEventListener('click', () => {
   load(urlInput.value.trim()).catch((e) => {
