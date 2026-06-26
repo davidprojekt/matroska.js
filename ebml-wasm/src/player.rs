@@ -10,9 +10,9 @@ use crate::fmp4::{build_init_segment, build_media_segment, CodecConfig, MediaKin
 use crate::mem_source::MemSource;
 use crate::index::{cue_cluster_for_time, parse_cues, parse_seek_head, CuePoint};
 use crate::matroska_data::{
-    ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CLUSTER, ID_CUES, ID_DURATION, ID_INFO,
-    ID_REFERENCEBLOCK, ID_SEEKHEAD, ID_SEGMENT, ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE,
-    ID_TRACKS,
+    ID_ATTACHEDFILE, ID_ATTACHMENTS, ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CLUSTER, ID_CUES,
+    ID_DURATION, ID_FILEDATA, ID_FILEMEDIATYPE, ID_FILENAME, ID_FILEUID, ID_INFO, ID_REFERENCEBLOCK,
+    ID_SEEKHEAD, ID_SEGMENT, ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE, ID_TRACKS,
 };
 use crate::remux::{
     audio_samples, cues_to_webvtt, parse_block, video_samples, BlockFrames, SubtitleCue, TimedFrame,
@@ -24,6 +24,41 @@ const DEFAULT_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const SEEK_ID_CUES: u64 = ID_CUES;
 const SEEK_ID_TRACKS: u64 = ID_TRACKS;
 const SEEK_ID_INFO: u64 = ID_INFO;
+const SEEK_ID_ATTACHMENTS: u64 = ID_ATTACHMENTS;
+
+/// One `AttachedFile`: its metadata plus the **absolute** byte range of its `FileData`.
+/// The data itself is never read here — only its range — so fonts can be fetched
+/// out-of-band by JS (a separate connection) without pulling them through the demuxer.
+#[derive(Debug, Clone)]
+pub struct Attachment {
+    pub name: String,
+    pub mime: String,
+    pub uid: u64,
+    /// Absolute offset of the first `FileData` byte.
+    pub data_start: u64,
+    /// Absolute offset of the last `FileData` byte (inclusive).
+    pub data_end: u64,
+}
+
+/// Whether a `FileMediaType` (or, as a fallback, a filename) denotes a font we should
+/// hand to libass. Muxers are inconsistent — some use `font/*`, some the legacy
+/// `application/x-truetype-font`, some mislabel fonts as `application/octet-stream`.
+fn is_font_attachment(mime: &str, name: &str) -> bool {
+    let m = mime.to_ascii_lowercase();
+    if m.starts_with("font/")
+        || m.contains("truetype")
+        || m.contains("opentype")
+        || m.contains("font-sfnt")
+        || m.contains("vnd.ms-opentype")
+        || m == "application/x-font-ttf"
+        || m == "application/x-font-otf"
+    {
+        return true;
+    }
+    // Fallback for octet-stream / empty mimes: trust the extension.
+    let n = name.to_ascii_lowercase();
+    n.ends_with(".ttf") || n.ends_with(".otf") || n.ends_with(".ttc") || n.ends_with(".otc")
+}
 
 pub struct Demuxer<S>
 where
@@ -40,6 +75,7 @@ where
     tracks: Vec<TrackData>,
     cues: Vec<CuePoint>,
     first_cluster_offset: Option<u64>,
+    attachments: Vec<Attachment>,
 }
 
 impl<S> Demuxer<S>
@@ -56,6 +92,7 @@ where
             tracks: Vec::new(),
             cues: Vec::new(),
             first_cluster_offset: None,
+            attachments: Vec::new(),
         };
         demux.parse().await;
         demux
@@ -79,6 +116,19 @@ where
         };
         let mem = Ebml::new(MemSource::new(bytes, content_start), self.ebml.id_map.clone());
         EbmlIterator::new(content_start, end, mem)
+    }
+
+    /// Read the element at absolute offset `abs` and, if it is a master, return an
+    /// iterator over its content **without** buffering it. Used for Attachments, whose
+    /// `FileData` payloads can be many MB — buffering would download every font.
+    async fn master_at(&self, abs: u64) -> Option<EbmlIterator<S>> {
+        let mut it = self.iter_at(abs, Some(self.segment_end));
+        let el = it.next().await?;
+        if let EbmlPayload::Master(m) = el.payload {
+            Some(m)
+        } else {
+            None
+        }
     }
 
     /// Read the element at absolute offset `abs` and, if it is a master, buffer its
@@ -114,6 +164,7 @@ where
         let mut seek_entries = Vec::new();
         let mut have_tracks = false;
         let mut have_cues = false;
+        let mut have_attachments = false;
 
         // Forward scan of Segment children up to the first Cluster.
         while let Some(el) = segment.next().await {
@@ -140,6 +191,12 @@ where
                         let it = self.buffer_range(cues.current, cues.end.unwrap_or(self.segment_end)).await;
                         self.cues = parse_cues(it).await;
                         have_cues = true;
+                    }
+                }
+                ID_ATTACHMENTS => {
+                    if let EbmlPayload::Master(att) = el.payload {
+                        self.attachments = parse_attachments(att).await;
+                        have_attachments = true;
                     }
                 }
                 ID_CLUSTER => {
@@ -170,6 +227,12 @@ where
                 SEEK_ID_INFO if self.duration_ticks == 0.0 => {
                     if let Some(it) = self.buffered_master_at(abs).await {
                         self.parse_info(it).await;
+                    }
+                }
+                SEEK_ID_ATTACHMENTS if !have_attachments => {
+                    if let Some(it) = self.master_at(abs).await {
+                        self.attachments = parse_attachments(it).await;
+                        have_attachments = true;
                     }
                 }
                 _ => {}
@@ -377,6 +440,105 @@ where
         cues
     }
 
+    /// JSON list of font attachments with the **absolute** byte range of each font's
+    /// data, e.g. `[{"name":"x.ttf","mime":"font/ttf","uid":1,"start":1234,"end":5678}]`.
+    /// JS fetches each range out-of-band (a separate connection) into a Blob for libass.
+    pub fn font_attachments_json(&self) -> String {
+        let mut items = Vec::new();
+        for a in &self.attachments {
+            if !is_font_attachment(&a.mime, &a.name) {
+                continue;
+            }
+            items.push(format!(
+                "{{\"name\":\"{}\",\"mime\":\"{}\",\"uid\":{},\"start\":{},\"end\":{}}}",
+                json_escape(&a.name),
+                json_escape(&a.mime),
+                a.uid,
+                a.data_start,
+                a.data_end,
+            ));
+        }
+        format!("[{}]", items.join(","))
+    }
+
+    /// The ASS/SSA script header (`[Script Info]` … `[Events]` Format line) for a
+    /// subtitle track — its `CodecPrivate`. This is the document libass parses first;
+    /// the per-line dialogue events are streamed in separately via [`Self::subtitle_events_json`].
+    pub fn subtitle_header(&self, track_number: u64) -> Option<String> {
+        let track = self.track(track_number)?;
+        if track.track_type != Some(TrackType::Subtitle) {
+            return None;
+        }
+        track
+            .codec_private
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+    }
+
+    /// Subtitle cues whose blocks fall in `[start_ms, end_ms)` of `track_number`, as JSON
+    /// `[{"start":ms,"end":ms,"text":"ReadOrder,Layer,Style,…,Text"}]`. Walks only the
+    /// clusters covering that window (the same clusters video already fetched, so mostly
+    /// cache hits) — never the whole file. `text` is the raw MKV block payload; JS turns
+    /// it into a `Dialogue:` line and dedups on its leading ReadOrder field.
+    pub async fn subtitle_events_json(&self, track_number: u64, start_ms: u64, end_ms: u64) -> String {
+        let is_sub = self
+            .track(track_number)
+            .map(|t| t.track_type == Some(TrackType::Subtitle))
+            .unwrap_or(false);
+        if !is_sub {
+            return "[]".to_string();
+        }
+        let Some(start_offset) = self.cue_offset(track_number, start_ms) else {
+            return "[]".to_string();
+        };
+        let cues = self
+            .collect_subtitle_cues_range(track_number, start_offset, end_ms)
+            .await;
+        let items: Vec<String> = cues
+            .iter()
+            .map(|c| {
+                format!(
+                    "{{\"start\":{},\"end\":{},\"text\":\"{}\"}}",
+                    c.start_ms,
+                    c.end_ms,
+                    json_escape(&c.text)
+                )
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// Like [`Self::collect_subtitle_cues`] but bounded: walks clusters from `start_offset`
+    /// and stops at the first cluster beginning at/after `end_ms` (peeked cheaply), so a
+    /// window's events come from only the clusters that cover it.
+    async fn collect_subtitle_cues_range(
+        &self,
+        track_number: u64,
+        start_offset: u64,
+        end_ms: u64,
+    ) -> Vec<SubtitleCue> {
+        let end_ticks = (end_ms * 1_000_000 / self.timestamp_scale_ns.max(1)) as i64;
+        let mut cues = Vec::new();
+        let mut clusters = self.iter_at(start_offset, Some(self.segment_end));
+        while let Some(el) = clusters.next().await {
+            if el.id != ID_CLUSTER {
+                continue;
+            }
+            let EbmlPayload::Master(cluster) = el.payload else {
+                continue;
+            };
+            let cstart = cluster.current;
+            let cend = cluster.end.unwrap_or(self.segment_end);
+            let cluster_time = self.peek_cluster_time(cstart, cend).await;
+            if !cues.is_empty() && cluster_time >= end_ticks {
+                break;
+            }
+            let buffered = self.buffer_range(cstart, cend).await;
+            walk_cluster_subtitles(buffered, track_number, self.timestamp_scale_ns, &mut cues).await;
+        }
+        cues
+    }
+
     pub fn duration_ms(&self) -> u64 {
         (self.duration_ticks * self.timestamp_scale_ns as f64 / 1e6) as u64
     }
@@ -570,6 +732,49 @@ async fn walk_cluster_subtitles<M: EbmlSource + PartialEq + Clone>(
     }
 }
 
+/// Parse an `Attachments` master into [`Attachment`]s. Iterates each `AttachedFile`'s
+/// fields, recording the `FileData` *range* (never its bytes), so this is cheap even
+/// over the network — only the small name/mime fields are actually read.
+async fn parse_attachments<S>(mut atts: EbmlIterator<S>) -> Vec<Attachment>
+where
+    S: EbmlSource + PartialEq + Clone,
+{
+    let mut out = Vec::new();
+    while let Some(el) = atts.next().await {
+        if el.id != ID_ATTACHEDFILE {
+            continue;
+        }
+        let EbmlPayload::Master(mut file) = el.payload else {
+            continue;
+        };
+        let mut name: Option<String> = None;
+        let mut mime: Option<String> = None;
+        let mut uid: Option<u64> = None;
+        let mut data: Option<(u64, u64)> = None;
+        while let Some(field) = file.next().await {
+            match field.payload {
+                EbmlPayload::String(s) if field.id == ID_FILENAME => name = Some(s),
+                EbmlPayload::String(s) if field.id == ID_FILEMEDIATYPE => mime = Some(s),
+                EbmlPayload::UnsignedInt(v) if field.id == ID_FILEUID => uid = Some(v),
+                EbmlPayload::Binary((start, end)) if field.id == ID_FILEDATA => {
+                    data = Some((start, end));
+                }
+                _ => {}
+            }
+        }
+        if let Some((data_start, data_end)) = data {
+            out.push(Attachment {
+                name: name.unwrap_or_default(),
+                mime: mime.unwrap_or_default(),
+                uid: uid.unwrap_or(0),
+                data_start,
+                data_end,
+            });
+        }
+    }
+    out
+}
+
 fn samples_per_frame(codec_id: Option<&str>, codec_private: Option<&[u8]>) -> u32 {
     match codec_id {
         Some("A_OPUS") => 960,
@@ -660,6 +865,21 @@ mod wasm {
 
         pub async fn subtitles(&self, track_number: u64) -> Option<String> {
             self.0.subtitles(track_number).await
+        }
+
+        /// JSON list of font attachments (name, mime, uid, absolute data byte range).
+        pub fn font_attachments(&self) -> String {
+            self.0.font_attachments_json()
+        }
+
+        /// The ASS/SSA header (`CodecPrivate`) for a subtitle track, or `None`.
+        pub fn subtitle_header(&self, track_number: u64) -> Option<String> {
+            self.0.subtitle_header(track_number)
+        }
+
+        /// JSON list of subtitle cues for `[start_ms, end_ms)` of `track_number`.
+        pub async fn subtitle_events(&self, track_number: u64, start_ms: u64, end_ms: u64) -> String {
+            self.0.subtitle_events_json(track_number, start_ms, end_ms).await
         }
 
         pub fn duration_ms(&self) -> u64 {

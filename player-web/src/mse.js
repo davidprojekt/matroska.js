@@ -75,6 +75,63 @@ class TrackFeeder {
   }
 }
 
+/**
+ * Feeds streamed subtitle cues for one ASS track, tiled on the same `boundaries` as
+ * video/audio. Each window's cues come from clusters the video pass has usually already
+ * fetched (cache hits), so this rides along the existing single forward stream. Events
+ * persist in libass, so backward seeks need no re-feed; forward seeks re-tile.
+ */
+class SubtitleFeeder {
+  constructor(player, trackNumber, boundaries, sink) {
+    this.player = player;
+    this.trackNumber = trackNumber;
+    this.boundaries = boundaries;
+    this.sink = sink; // AssSubtitleController
+    this.index = 0;
+    this.busy = false;
+    this.done = false;
+    this.generation = 0;
+  }
+
+  /** Time (ms) through which windows have been requested — the next unfed window start. */
+  fedThroughMs() {
+    return this.index >= this.boundaries.length - 1
+      ? Infinity
+      : this.boundaries[this.index];
+  }
+
+  seekTo(timeMs) {
+    let idx = 0;
+    for (let i = 0; i < this.boundaries.length - 1; i++) {
+      if (this.boundaries[i] <= timeMs) idx = i;
+      else break;
+    }
+    this.index = idx;
+    this.done = false;
+    this.generation += 1;
+  }
+
+  async feedOne() {
+    if (this.busy || this.done) return;
+    if (this.index >= this.boundaries.length - 1) {
+      this.done = true;
+      return;
+    }
+    this.busy = true;
+    const gen = this.generation;
+    const start = this.boundaries[this.index];
+    const end = this.boundaries[this.index + 1];
+    this.index += 1;
+    try {
+      const json = await this.player.subtitle_events(BIG(this.trackNumber), BIG(start), BIG(end));
+      if (gen === this.generation && json) this.sink.addEvents(JSON.parse(json));
+    } catch (e) {
+      console.error('subtitle_events failed', e);
+    }
+    this.busy = false;
+  }
+}
+
 export class MseController {
   /**
    * @param player  MatroskaPlayer (wasm)
@@ -93,6 +150,7 @@ export class MseController {
     this.mediaSource = null;
     this.video$ = null; // { feeder, pump, track }
     this.audio$ = null;
+    this.subs$ = null; // { feeder, trackNumber } for the active ASS track, or null
     this.bufferAheadMs = 5000;
     // Smaller buffer required before playback can begin — keeps startup latency (and the
     // up-front download) low, while steady-state still fills to bufferAheadMs.
@@ -166,6 +224,15 @@ export class MseController {
           await stream.feeder.feedOne();
         }
       }
+      // Subtitles ride the same sequential chain (preserving the source's single-in-flight
+      // -read invariant). Cues are tiny; fetch windows a bit further ahead than media.
+      if (this.subs$) {
+        let guard = 0;
+        const subTarget = currentMs + aheadMs + 4000;
+        while (!this.subs$.feeder.done && this.subs$.feeder.fedThroughMs() < subTarget && guard++ < 128) {
+          await this.subs$.feeder.feedOne();
+        }
+      }
       this.maybeEndOfStream();
     } finally {
       this.topUpQueued = false;
@@ -192,7 +259,20 @@ export class MseController {
       stream.pump.clear();
       stream.feeder.seekTo(t);
     }
+    if (this.subs$) this.subs$.feeder.seekTo(t);
     this.topUp();
+  }
+
+  /** Begin streaming subtitle cues for `trackNumber` into `sink` (AssSubtitleController). */
+  setSubtitleTrack(trackNumber, sink) {
+    const feeder = new SubtitleFeeder(this.player, trackNumber, this.boundaries, sink);
+    feeder.seekTo(this.video.currentTime * 1000);
+    this.subs$ = { trackNumber, feeder };
+    this.topUp();
+  }
+
+  clearSubtitleTrack() {
+    this.subs$ = null;
   }
 
   /** Switch the active audio track, rebuilding the audio buffer at the playhead. */

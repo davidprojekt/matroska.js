@@ -4,6 +4,7 @@ import '@videojs/html/video/skin.css';
 
 import initWasm, {MatroskaPlayer} from 'ebml-wasm';
 import {MseController} from './mse.js';
+import {AssSubtitleController} from './subtitles.js';
 import {addTorrent, streamUrlFor} from './torrent.js';
 
 const statusEl = document.getElementById('status');
@@ -19,12 +20,21 @@ const fetchTorrentBtn = document.getElementById('fetchTorrent');
 const torrentFilesLabel = document.getElementById('torrentFilesLabel');
 const torrentFilesSelect = document.getElementById('torrentFiles');
 
-// Subtitle codecs we can turn into WebVTT today (ASS/SSA need libass — out of scope).
+// Plain-text subtitle codecs we extract to WebVTT and attach as a native <track>.
 const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']);
+// ASS/SSA codecs rendered via libass (JASSUB) over a canvas overlay.
+const ASS_SUB_CODECS = new Set(['S_TEXT/ASS', 'S_TEXT/SSA']);
+
+const subKind = (t) =>
+  ASS_SUB_CODECS.has(t.codec_id) ? 'ass' : TEXT_SUB_CODECS.has(t.codec_id) ? 'text' : null;
 
 let activePlayer = null;
-const loadedSubs = new Map(); // track number → HTMLTrackElement
+let assSubs = null; // AssSubtitleController for the current file
+let trackList = []; // parsed tracks of the current file (for forced-sub matching)
+let userChoseSub = false; // true once the user explicitly picks a subtitle/Off
+const loadedSubs = new Map(); // track number → HTMLTrackElement (text path)
 const subtitleInfo = new Map(); // track number → { language, name }
+const subKindByNumber = new Map(); // track number → 'ass' | 'text'
 
 const status = (msg) => {
   statusEl.textContent = msg;
@@ -101,13 +111,21 @@ async function load(url, { skipPreflight = false } = {}) {
   subtitleObjectUrls = [];
   loadedSubs.clear();
   subtitleInfo.clear();
+  subKindByNumber.clear();
+  userChoseSub = false;
+  if (assSubs) {
+    assSubs.destroy();
+    assSubs = null;
+  }
   for (const t of [...video.querySelectorAll('track')]) t.remove();
   audioSelect.innerHTML = '';
   subsSelect.innerHTML = '';
 
   const player = await MatroskaPlayer.open(url);
   activePlayer = player;
+  assSubs = new AssSubtitleController(video);
   const tracks = JSON.parse(player.tracks());
+  trackList = tracks;
   const durationMs = Number(player.duration_ms());
   const cueTimes = JSON.parse(player.cue_times()).map(Number);
 
@@ -132,8 +150,7 @@ async function load(url, { skipPreflight = false } = {}) {
     audioSelect.appendChild(opt);
   }
 
-  // Subtitles are loaded lazily on selection (extraction scans the file), so only
-  // populate the menu here. ASS/SSA are listed but disabled (libass is out of scope).
+  // ASS tracks render via libass; plain text is lazily extracted to WebVTT on selection.
   const offOpt = document.createElement('option');
   offOpt.value = '';
   offOpt.textContent = 'Off';
@@ -141,17 +158,25 @@ async function load(url, { skipPreflight = false } = {}) {
   subsSelect.appendChild(offOpt);
   for (const t of subtitleTracks) {
     subtitleInfo.set(t.number, { language: t.language, name: t.name });
+    const kind = subKind(t);
+    if (kind) subKindByNumber.set(t.number, kind);
     const opt = document.createElement('option');
     opt.value = String(t.number);
-    const loadable = TEXT_SUB_CODECS.has(t.codec_id);
-    opt.disabled = !loadable;
-    const tag = loadable ? '' : ' [ASS — not supported yet]';
+    opt.disabled = !kind;
+    const tag = kind ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
     opt.textContent = `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`;
     subsSelect.appendChild(opt);
   }
 
   controller = new MseController(player, video, tracks, durationMs, cueTimes);
   await controller.start(videoTrack, defaultAudio);
+
+  // Fonts download out-of-band (separate connections) so they don't disturb the single
+  // forward media stream; subtitles render once they arrive. Fire and forget.
+  loadFonts(player, url).catch((e) => console.warn('font loading failed', e));
+
+  // Soft-force any forced subtitle matching the starting audio language.
+  if (defaultAudio) applyForcedSubtitle(defaultAudio.language);
 
   status(
     `Loaded. video=${videoTrack ? videoTrack.codec_string : 'none'} ` +
@@ -179,29 +204,105 @@ async function loadSubtitle(player, number) {
   return track;
 }
 
-subsSelect.addEventListener('change', async () => {
+// Turn a subtitle selection on: '' = off, an ASS track = libass, a text track = WebVTT.
+async function selectSubtitle(value) {
+  // Reset both renderers first so only the chosen track is active.
   for (const tt of video.textTracks) tt.mode = 'disabled';
-  const value = subsSelect.value;
+  if (assSubs) assSubs.disable();
+  if (controller) controller.clearSubtitleTrack();
   if (!value || !activePlayer) return;
+
   const number = Number(value);
-  let el = loadedSubs.get(number);
-  if (!el) {
-    status('Extracting subtitles (one-time scan)…');
+  const kind = subKindByNumber.get(number);
+  if (kind === 'ass') {
     try {
-      el = await loadSubtitle(activePlayer, number);
+      const header = activePlayer.subtitle_header(BigInt(number));
+      await assSubs.enableTrack(header);
+      controller.setSubtitleTrack(number, assSubs);
+      status('ASS subtitles on (streaming).');
     } catch (e) {
       console.error(e);
-      status('Subtitle extraction failed: ' + e.message);
-      return;
+      status('ASS subtitle error: ' + e.message);
     }
+  } else if (kind === 'text') {
+    let el = loadedSubs.get(number);
     if (!el) {
-      status('No subtitle cues found for that track.');
-      return;
+      status('Extracting subtitles (one-time scan)…');
+      try {
+        el = await loadSubtitle(activePlayer, number);
+      } catch (e) {
+        console.error(e);
+        status('Subtitle extraction failed: ' + e.message);
+        return;
+      }
+      if (!el) {
+        status('No subtitle cues found for that track.');
+        return;
+      }
+      status('Subtitles ready.');
     }
-    status('Subtitles ready.');
+    if (el.track) el.track.mode = 'showing';
   }
-  if (el.track) el.track.mode = 'showing';
+}
+
+subsSelect.addEventListener('change', () => {
+  userChoseSub = true; // explicit choice — forced-subtitle logic must not override it
+  selectSubtitle(subsSelect.value);
 });
+
+// Fetch font attachments out-of-band (one Range request each, parallel, on separate
+// connections) so they never contend with the single forward media stream, and hand the
+// bytes to libass. baseUrl is the same URL the demuxer plays from (HTTP, the torrent
+// service-worker URL, or a blob: URL — all support Range).
+async function loadFonts(player, baseUrl) {
+  const sink = assSubs;
+  let list;
+  try {
+    list = JSON.parse(player.font_attachments());
+  } catch {
+    return;
+  }
+  if (!list.length) return;
+  status(`Loading ${list.length} font attachment(s)…`);
+  await Promise.all(
+    list.map(async (f) => {
+      try {
+        const resp = await fetch(baseUrl, { headers: { Range: `bytes=${f.start}-${f.end}` } });
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        // If the server ignored Range and returned the whole body (200), slice ourselves.
+        const data = resp.status === 206 ? buf : buf.slice(Number(f.start), Number(f.end) + 1);
+        if (sink === assSubs) sink.addFontData(data); // ignore if a new file loaded meanwhile
+      } catch (e) {
+        console.warn(`font "${f.name}" fetch failed`, e);
+      }
+    })
+  );
+  status(`Fonts ready (${list.length}).`);
+}
+
+// Two language tags match if equal or share the same primary subtag (e.g. "jpn"/"ja").
+function langMatch(a, b) {
+  if (!a || !b) return false;
+  a = a.toLowerCase();
+  b = b.toLowerCase();
+  return a === b || a.slice(0, 2) === b.slice(0, 2);
+}
+
+// Soft-force a forced subtitle for `audioLang` (foreign signs/songs) — but only if the
+// user hasn't made their own subtitle choice.
+function applyForcedSubtitle(audioLang) {
+  if (userChoseSub) return;
+  const forced = trackList.find(
+    (t) =>
+      t.type === 'subtitle' &&
+      t.forced &&
+      subKindByNumber.has(t.number) &&
+      langMatch(t.language, audioLang)
+  );
+  if (!forced) return;
+  subsSelect.value = String(forced.number);
+  selectSubtitle(String(forced.number)); // programmatic — keep userChoseSub false
+}
 
 function reportTracks(tracks) {
   const lines = tracks.map(
@@ -211,7 +312,10 @@ function reportTracks(tracks) {
 }
 
 audioSelect.addEventListener('change', () => {
-  if (controller) controller.switchAudio(Number(audioSelect.value));
+  const number = Number(audioSelect.value);
+  if (controller) controller.switchAudio(number);
+  const t = trackList.find((x) => x.number === number);
+  if (t) applyForcedSubtitle(t.language);
 });
 
 loadBtn.addEventListener('click', () => {
@@ -303,6 +407,7 @@ torrentFilesSelect.addEventListener('change', () => {
     status('Error: ' + e.message);
   });
 });
+
 
 // Auto-load the default URL on startup.
 if(urlInput.value.trim().length !== 0) {

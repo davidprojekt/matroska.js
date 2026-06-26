@@ -18,9 +18,12 @@
         padding: 1.5rem;
       }
       h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
-      .stage { width: min(100%, 1100px); }
+      .stage { width: min(100%, 1100px); position: relative; }
       video-player { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
       video { width: 100%; height: 100%; }
+      /* libass (JASSUB) overlay — created at runtime, sized/positioned by JASSUB over the
+         video; pointer-events:none lets clicks through to the player controls. */
+      .jassub-overlay { position: absolute; pointer-events: none; }
       .panel {
         width: min(100%, 1100px);
         display: flex;
@@ -91,7 +94,7 @@
   <body>
   <h1>matroska.js — MKV → fMP4 → MSE player (video.js v10)</h1>
 
-  <div class="panel">
+  <div class="panel" style="display: none;">
     <label>Torrent / magnet
       <input id="magnet" type="text" placeholder="magnet:?xt=urn:btih:…"
              value="magnet:?xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10&dn=Sintel&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.webtorrent.dev" />
@@ -102,7 +105,7 @@
       <select id="torrentFiles"></select>
     </label>
   </div>
-  <div class="hint">
+  <div class="hint" style="display: none;">
     Browser WebTorrent only connects to <strong>WebRTC-seeded</strong> torrents (WSS trackers / web seeds).
     A normal magnet with no web peers will hang at “fetching metadata”. The prefilled Sintel magnet works.
   </div>
