@@ -30,7 +30,8 @@ This is a Cargo workspace + a small web frontend:
 | ------------- | ---------------------------------------------------------------------------------------------- |
 | `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. |
 | `ebml-wasm`   | The EBML reader **and the MKV→fMP4 remuxer**, exposed to JS via `wasm-bindgen`. The reader is a forward-only **async iterator** over `EbmlElement`s; on top of it `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `cue_offset()`, `subtitles()`, and `cue_times()`. The fMP4 box writer lives in `fmp4.rs`, block/sample extraction in `remux.rs`, the seek index in `index.rs`, and track/codec mapping in `track.rs`. |
-| `player-web`  | The **MKV player** frontend: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the WASM remuxer, with a custom audio-track selector and native WebVTT subtitle tracks. |
+| `player-web`  | The **MKV player demo**: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the WASM remuxer, with a custom audio-track selector and native WebVTT subtitle tracks. File picker, URL box, and WebTorrent streaming. |
+| `player-embed`| A **headless embeddable** build of the player: no chrome, just the video filling the frame. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. Shares the player core with `player-web` (sans WebTorrent). |
 | `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). |
 
 ## Supported codecs
@@ -84,6 +85,33 @@ npm run dev          # open the printed Vite URL
 Put `.mkv` files under `ebml-wasm/example/` and point the URL box at them. Codecs the
 browser can't decode (e.g. HEVC in Firefox, AC-3 in Chrome/Firefox) are listed but
 flagged unsupported.
+
+### The embeddable player (`player-embed`)
+
+A chrome-free build that plays whatever video URL is passed in the page URL — meant to be
+hosted once and dropped into an `<iframe>` by anyone.
+
+```sh
+# Build the WASM remuxer first (step 1 above), then:
+cd player-embed
+npm install
+npm run dev          # dev server
+npm run build        # → dist/, deploy as a static site
+```
+
+Point an embedder at the deployed page and pass the video URL as `?src=` (URL-encoded):
+
+```html
+<iframe
+  src="https://your-host.example/?src=https%3A%2F%2Fmedia.example.com%2Fvideo.mkv"
+  width="800" height="450" allowfullscreen></iframe>
+```
+
+`?url=` is accepted as an alias, and a Base64-encoded `#hash` works too (matching the
+demo page's "Copy" link). The video server must support HTTP **byte ranges** and, if it's
+a different origin, send **CORS** headers (`Access-Control-Allow-Origin`) — the embed
+preflights and shows a clear message otherwise. Add `allowfullscreen` to the iframe so the
+fullscreen button works.
 
 ### The EBML inspector (`matroska-web`)
 
