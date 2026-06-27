@@ -6,7 +6,7 @@ use crate::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
 use crate::matroska_data::{
     ID_AUDIO, ID_BITDEPTH, ID_CHANNELS, ID_CODECDELAY, ID_CODECID, ID_CODECNAME, ID_CODECPRIVATE,
     ID_DEFAULTDURATION, ID_DISPLAYHEIGHT, ID_DISPLAYWIDTH, ID_FLAGDEFAULT, ID_FLAGFORCED,
-    ID_LANGUAGE, ID_LANGUAGEBCP47, ID_PIXELHEIGHT, ID_PIXELWIDTH, ID_SAMPLINGFREQUENCY,
+    ID_LANGUAGE, ID_LANGUAGEBCP47, ID_NAME, ID_PIXELHEIGHT, ID_PIXELWIDTH, ID_SAMPLINGFREQUENCY,
     ID_SEEKPREROLL, ID_TRACKENTRY, ID_TRACKNUMBER, ID_TRACKTYPE, ID_TRACKUID, ID_VIDEO,
 };
 
@@ -62,6 +62,8 @@ pub struct TrackData {
     pub codec_id: Option<String>,
     pub codec_private: Option<Vec<u8>>,
     pub codec_name: Option<String>,
+    /// Human-readable track title (`Name` element), e.g. "Signs & Songs", "English (SDH)".
+    pub name: Option<String>,
 
     /// Nanoseconds per frame (`DefaultDuration`). Needed for sample durations.
     pub default_duration: Option<u64>,
@@ -273,6 +275,7 @@ where
             EbmlPayload::String(s) => match field.id {
                 ID_CODECID => track.codec_id = Some(s),
                 ID_CODECNAME => track.codec_name = Some(s),
+                ID_NAME => track.name = Some(s),
                 ID_LANGUAGE => track.language = Some(s),
                 ID_LANGUAGEBCP47 => track.language_bcp47 = Some(s),
                 _ => {}

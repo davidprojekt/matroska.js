@@ -659,7 +659,12 @@ where
             let codec_id = t.codec_id.as_deref().unwrap_or("");
             let codec_string = t.codec_string().unwrap_or_default();
             let mime = t.mime_type().unwrap_or_default();
-            let name = t.codec_name.clone().unwrap_or_default();
+            // Prefer the human-readable track title (`Name`); fall back to `CodecName`.
+            let name = t
+                .name
+                .clone()
+                .or_else(|| t.codec_name.clone())
+                .unwrap_or_default();
             items.push(format!(
                 "{{\"number\":{},\"type\":\"{}\",\"codec_id\":\"{}\",\"codec_string\":\"{}\",\"mime\":\"{}\",\"language\":\"{}\",\"name\":\"{}\",\"default\":{},\"forced\":{}}}",
                 t.track_number.unwrap_or(0),
