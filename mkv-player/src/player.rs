@@ -5,11 +5,11 @@
 //! `FsSource`; [`MatroskaPlayer`] is the `wasm-bindgen` facade over
 //! `Demuxer<FetchSource>`.
 
-use crate::ebml::{Ebml, EbmlIterator, EbmlPayload, EbmlSource};
+use ebml_wasm::ebml::{Ebml, EbmlIterator, EbmlPayload, EbmlSource};
 use crate::fmp4::{build_init_segment, build_media_segment, CodecConfig, MediaKind, TrackConfig};
-use crate::mem_source::MemSource;
+use ebml_wasm::mem_source::MemSource;
 use crate::index::{cue_cluster_for_time, parse_cues, parse_seek_head, CuePoint};
-use crate::matroska_data::{
+use ebml_wasm::matroska_data::{
     ID_ATTACHEDFILE, ID_ATTACHMENTS, ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CHAPLANGUAGE,
     ID_CHAPLANGUAGEBCP47, ID_CHAPSTRING, ID_CHAPTERATOM, ID_CHAPTERDISPLAY, ID_CHAPTERFLAGHIDDEN,
     ID_CHAPTERS, ID_CHAPTERTIMEEND, ID_CHAPTERTIMESTART, ID_CHAPTERUID, ID_CLUSTER, ID_CUES,
@@ -1006,7 +1006,7 @@ fn json_escape(s: &str) -> String {
 mod wasm {
     use super::*;
     use crate::stream_source::StreamSource;
-    use crate::matroska_data::element_id_type_map;
+    use ebml_wasm::matroska_data::element_id_type_map;
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]

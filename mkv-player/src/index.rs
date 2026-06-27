@@ -2,8 +2,8 @@
 //! `SeekPosition` / `CueClusterPosition`), the `SeekHead` element index, and the
 //! `Cues` time→byte index used for seeking.
 
-use crate::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
-use crate::matroska_data::{
+use ebml_wasm::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
+use ebml_wasm::matroska_data::{
     ID_CUECLUSTERPOSITION, ID_CUEPOINT, ID_CUERELATIVEPOSITION, ID_CUETIME, ID_CUETRACK,
     ID_CUETRACKPOSITIONS, ID_SEEK, ID_SEEKID, ID_SEEKPOSITION,
 };

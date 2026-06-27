@@ -1,0 +1,11 @@
+{
+  "name": "mkv-player-build",
+  "version": "1.0.0",
+  "description": "Build helper for the MKV player/remuxer wasm package (AGPL-3.0).",
+  "private": true,
+  "scripts": {
+    "dev": "wasm-pack build --target web",
+    "build": "wasm-pack build --target web"
+  },
+  "license": "AGPL-3.0-only"
+}

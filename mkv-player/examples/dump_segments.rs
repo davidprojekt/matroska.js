@@ -1,6 +1,6 @@
 //! Native harness for validating the remuxer without a browser.
 //!
-//! Usage: `cargo run -p ebml-wasm --example dump_segments -- <file.mkv> <out_dir> [track]`
+//! Usage: `cargo run -p mkv-player --example dump_segments -- <file.mkv> <out_dir> [track]`
 //!
 //! Writes `<out>/init_<track>.mp4` and `<out>/full_<track>.mp4` (init + first media
 //! segment concatenated) for each muxable track, so `ffprobe`/`mp4box` can validate.
@@ -8,7 +8,7 @@
 use ebml_wasm::ebml::Ebml;
 use ebml_wasm::fs_source::FsSource;
 use ebml_wasm::matroska_data::element_id_type_map;
-use ebml_wasm::player::Demuxer;
+use mkv_player::player::Demuxer;
 use std::fs;
 use std::path::Path;
 

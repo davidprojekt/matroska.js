@@ -5,7 +5,7 @@ import '@videojs/html/video/skin.css';
 // which needs the element defined and the default icon set registered.
 import '@videojs/html/icons/element/default';
 
-import initWasm, {MatroskaPlayer} from 'ebml-wasm';
+import initWasm, {MatroskaPlayer} from 'mkv-player';
 import {MseController} from './mse.js';
 import {AssSubtitleController} from './subtitles.js';
 import {TrackMenu} from './menu.js';

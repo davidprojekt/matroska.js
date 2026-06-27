@@ -13,3 +13,6 @@
 
 # Sample media
 *.mkv
+
+# Internal planning notes
+/*PLAN.md

@@ -13,8 +13,9 @@ A full MKV web player. The container is parsed in Rust/WASM and **remuxed on the
 into fragmented MP4 (fMP4)** that is fed to a `<video>` element through Media Source
 Extensions — no transcoding, nothing uploaded. The browser plays it as long as the
 underlying codecs are web-compatible, with **switchable audio and subtitle tracks**
-and seeking. (ASS subtitle rendering via [libass](https://github.com/libass/libass)
-is planned; for now `S_TEXT/ASS` tracks are listed but not rendered.)
+and seeking. **ASS/SSA subtitles are rendered via [libass](https://github.com/libass/libass)
+(through [JASSUB](https://github.com/ThaUnknown/jassub)) and work well.** (Plain-text /
+WebVTT subtitle tracks are **not currently working**.)
 
 The WASM side extracts encoded frames (copying length-prefixed NALs straight through),
 reconstructs DTS/composition offsets for B-frames, and writes fMP4 init + media
@@ -28,11 +29,12 @@ This is a Cargo workspace + a small web frontend:
 
 | Crate / dir   | What it is                                                                                     |
 | ------------- | ---------------------------------------------------------------------------------------------- |
-| `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. |
-| `ebml-wasm`   | The EBML reader **and the MKV→fMP4 remuxer**, exposed to JS via `wasm-bindgen`. The reader is a forward-only **async iterator** over `EbmlElement`s; on top of it `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `cue_offset()`, `subtitles()`, and `cue_times()`. The fMP4 box writer lives in `fmp4.rs`, block/sample extraction in `remux.rs`, the seek index in `index.rs`, and track/codec mapping in `track.rs`. |
-| `player-web`  | The **MKV player demo**: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the WASM remuxer, with a custom audio-track selector and native WebVTT subtitle tracks. File picker, URL box, and WebTorrent streaming. |
-| `player-embed`| A **headless embeddable** build of the player: no chrome, just the video filling the frame. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. Shares the player core with `player-web` (sans WebTorrent). |
-| `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). |
+| `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. (MIT) |
+| `ebml-wasm`   | The **EBML/Matroska parser core**: a forward-only **async iterator** over `EbmlElement`s plus the byte sources (`FetchSource`, `FsSource`, `MemSource`), exposed to JS via `wasm-bindgen` (`EbmlReader`, `FetchSourceEbml`). Container parsing only — no remuxing. (MIT) |
+| `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `cue_offset()`, `subtitles()`, and `cue_times()`. The fMP4 box writer lives in `fmp4.rs`, block/sample extraction in `remux.rs`, the seek index in `index.rs`, track/codec mapping in `track.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
+| `player-web`  | The **MKV player demo**: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the `mkv-player` WASM remuxer, with a custom audio-track selector and ASS/SSA subtitle rendering via libass (JASSUB). File picker, URL box, and WebTorrent streaming. (AGPL-3.0) |
+| `player-embed`| A **headless embeddable** build of the player: no chrome, just the video filling the frame. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. Shares the `mkv-player` core with `player-web` (sans WebTorrent). (AGPL-3.0) |
+| `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. |
 
 ## Supported codecs
 
@@ -54,12 +56,13 @@ listed as *not muxable*; tracks it wraps but the browser can't decode are flagge
 | Audio     | `A_EAC3`                           | E-AC-3               | `ec-3`            |
 | Audio     | `A_FLAC`                           | FLAC                 | `fLaC`            |
 | Audio     | `A_MPEG/L3`                        | MP3                  | `mp4a` (`.6B`)    |
-| Subtitle  | `S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASCII` | text → WebVTT | (extracted)   |
+| Subtitle  | `S_TEXT/ASS`, `S_TEXT/SSA`         | rendered via libass (JASSUB) | (extracted)   |
+| Subtitle  | `S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASCII` | text → WebVTT — **not working yet** | (extracted) |
 
-Anything else (DTS, TrueHD, Vorbis, PCM; MPEG-2/older video; `S_TEXT/ASS`) is not
-muxable today and would need transcoding (planned via ffmpeg-wasm) or, for ASS,
-[libass](https://github.com/libass/libass). MP3 frame durations assume MPEG-1 Layer III
-(1152 samples/frame); the rarer MPEG-2/2.5 Layer III (576) is not yet distinguished.
+Anything else (DTS, TrueHD, Vorbis, PCM; MPEG-2/older video) is not muxable today and
+would need transcoding (planned via ffmpeg-wasm). MP3 frame durations assume MPEG-1
+Layer III (1152 samples/frame); the rarer MPEG-2/2.5 Layer III (576) is not yet
+distinguished.
 
 ## Build & run
 
@@ -68,12 +71,13 @@ You'll need the Rust toolchain and [`wasm-pack`](https://rustwasm.github.io/wasm
 ### The player (`player-web`)
 
 ```sh
-# 1. Build the WASM remuxer (outputs ebml-wasm/pkg, consumed by player-web).
-cd ebml-wasm
+# 1. Build the WASM remuxer (outputs mkv-player/pkg, consumed by player-web).
+cd mkv-player
 wasm-pack build --target web
 
 # 2. Serve the sample media with Range support + CORS on :8501.
 #    (player-web defaults to http://localhost:8501/example/toaru.mkv)
+cd ../ebml-wasm
 npm start            # simple-http-server -i --cors --port 8501
 
 # 3. In another shell, run the player dev server.
@@ -81,6 +85,9 @@ cd ../player-web
 npm install
 npm run dev          # open the printed Vite URL
 ```
+
+> `npm run build` in `player-web` / `player-embed` runs the `mkv-player` wasm build
+> for you, so step 1 is only needed for the dev server.
 
 Put `.mkv` files under `ebml-wasm/example/` and point the URL box at them. Codecs the
 browser can't decode (e.g. HEVC in Firefox, AC-3 in Chrome/Firefox) are listed but
@@ -92,7 +99,7 @@ A chrome-free build that plays whatever video URL is passed in the page URL — 
 hosted once and dropped into an `<iframe>` by anyone.
 
 ```sh
-# Build the WASM remuxer first (step 1 above), then:
+# Build the WASM remuxer first (mkv-player, step 1 above), then:
 cd player-embed
 npm install
 npm run dev          # dev server
@@ -130,14 +137,18 @@ npx simple-http-server -i --cors --port 8501
 
 ```sh
 # Dumps init + first media segment per muxable track for ffprobe/mp4box to check.
-cargo run -p ebml-wasm --example dump_segments -- ebml-wasm/example/toaru.mkv /tmp/out
+cargo run -p mkv-player --example dump_segments -- ebml-wasm/example/toaru.mkv /tmp/out
 ```
 
 ## License
 
-**GNU Affero General Public License v3.0** (AGPL-3.0) — see [`LICENSE.txt`](LICENSE.txt).
+This repository is split by component:
 
-You're free to use, study, modify, and share this. The catch: if you distribute
-it **or run a modified version as a network service**, you must release your
-source under the same license. In short — fork it all you want, but your changes
-stay open too.
+- **`ebml-spec` and `ebml-wasm`** — the EBML/Matroska **parser core** — are licensed
+  under the **MIT License** (see [`ebml-wasm/LICENSE`](ebml-wasm/LICENSE)). Use them
+  freely, including in closed-source projects.
+- **`mkv-player`** (the MKV→fMP4 remuxer/player) and the **player frontends**
+  (`player-web`, `player-embed`) are licensed under the **GNU Affero General Public
+  License v3.0** (AGPL-3.0) — see [`LICENSE.txt`](LICENSE.txt). You're free to use,
+  study, modify, and share them, but if you distribute them **or run a modified
+  version as a network service**, you must release your source under the same license.

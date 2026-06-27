@@ -9,12 +9,12 @@
     "predev": "npm run copy-sw",
     "prebuild": "npm run copy-sw",
     "dev": "vite",
-    "build": "bash -c 'cd ../ebml-wasm && npm run build' && vite build",
+    "build": "bash -c 'cd ../mkv-player && npm run build' && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@videojs/html": "^10.0.0-beta.24",
-    "ebml-wasm": "file:../ebml-wasm/pkg",
+    "mkv-player": "file:../mkv-player/pkg",
     "jassub": "^2.5.6",
     "webtorrent": "^3.0.16"
   },
