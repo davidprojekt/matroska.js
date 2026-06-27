@@ -1,10 +1,8 @@
 use std::cell::RefCell;
-use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::{Read, Seek, SeekFrom};
-use gloo_net::http::Request;
 use crate::ebml::{EbmlSource, Size};
 
 thread_local! {
@@ -34,7 +32,6 @@ impl FsSource {
 }
 
 fn read_byte_range(file_path: &str, start: u64, length: usize) -> io::Result<Vec<u8>> {
-    //println!("{} - {}", start, length);
     FILE_CACHE.with(|cache| {
         let mut map = cache.borrow_mut();
 

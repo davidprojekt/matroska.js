@@ -175,8 +175,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     let value = Ebml::<S>::bytes_to_int(bytes);
 
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
-
                     EbmlPayload::SignedInt(value)
                 }
                 EbmlType::UnsignedInteger => {
@@ -188,11 +186,7 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
                     let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     self.current += size;
 
-                   // web_sys::console::log_1(&format!(" > {:?} (Length: {})", bytes, size).into());
-
                     let value = Ebml::<S>::bytes_to_uint(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, size).into());
 
                     EbmlPayload::UnsignedInt(value)
                 }
@@ -210,8 +204,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     let value = Ebml::<S>::bytes_to_string(bytes);
 
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
-
                     EbmlPayload::String(value)
                 },
                 EbmlType::UTF8 => {
@@ -219,8 +211,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
                     self.current += size;
 
                     let value = Ebml::<S>::bytes_to_string(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
 
                     EbmlPayload::String(value)
                 },
@@ -233,7 +223,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
                     EbmlPayload::Date(value)
                 },
                 EbmlType::Binary => {
-                    // let value = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     let offset_at_size = self.current;
                     self.current += size;
 
@@ -250,7 +239,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
                     EbmlPayload::Invalid(None) // unimplemented
                 },
                 EbmlType::Master => {
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", size, length).into());
                     let offset_at_size = self.current;
 
                     let elements: EbmlIterator<S> = EbmlIterator::new(self.current, offset_at_size + size, self.ebml.clone());
@@ -284,8 +272,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
     }
 
     pub fn bytes_to_uint(raw_bytes: Vec<u8>) -> u64 {
-       // web_sys::console::log_1(&format!("{:?}", raw_bytes.len()).into());
-
         let mut bytes: [u8; 8] = [0; 8];
         let offset = 8 - raw_bytes.len();
         bytes[offset..].copy_from_slice(raw_bytes.as_slice());
@@ -295,8 +281,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
     }
 
     pub fn bytes_to_int(raw_bytes: Vec<u8>) -> i64 {
-       // web_sys::console::log_1(&format!("bytes length by {}", raw_bytes.len()).into());
-
         let mut bytes: [u8; 8] = [0; 8];
         let offset = 8 - raw_bytes.len();
         bytes[offset..].copy_from_slice(raw_bytes.as_slice());
@@ -365,8 +349,6 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
             return (0, Vec::new())
         }
 
-       // web_sys::console::log_1(&format!("Shift by {}", octet_length).into());
-
         if octet_length == 8 {
             return (octet_length, raw_bytes)
         }
@@ -398,188 +380,5 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
 
         (octet_length, integer_result)
     }
-
-    /*pub async fn read_element(&self, start: Size, skip_binary: bool, max_recursion: usize) -> (Size, Option<EbmlElement>) {
-        let mut offset = start;
-
-
-       // web_sys::console::log_1(&format!("Starting new Element").into());
-
-        let (length, id) = self.read_variable_size_id(start).await;
-        offset += length;
-
-        if length == 0 {
-            return (1, None)
-        }
-
-       // web_sys::console::log_1(&format!("Found ID: {:#X} ({})", id, length).into());
-        //web_sys::console::log_1(&format!("{:?}", self.id_map).into());
-
-        if let Some(ebml_type) = self.id_map.get(&id) {
-           // web_sys::console::log_1(&format!(" > {:?}", ebml_type).into());
-
-            let payload: EbmlPayload = match ebml_type {
-                EbmlType::SignedInteger => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    if size > 8 {
-                        offset += size;
-                        return (offset - start, None);
-                    }
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                    let value = Self::bytes_to_int(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
-
-                    EbmlPayload::SignedInt(value)
-                }
-                EbmlType::UnsignedInteger => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    if size > 8 {
-                        offset += size;
-                        return (offset - start, None);
-                    }
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                   // web_sys::console::log_1(&format!(" > {:?} (Length: {})", bytes, size).into());
-
-                    let value = Self::bytes_to_uint(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, size).into());
-
-                    EbmlPayload::UnsignedInt(value)
-                }
-                EbmlType::Float => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                    let value = Self::bytes_to_float(bytes);
-
-                    EbmlPayload::Float(value)
-                },
-                EbmlType::String => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                    let value = Self::bytes_to_string(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
-
-                    EbmlPayload::String(value)
-                },
-                EbmlType::UTF8 => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                    let value = Self::bytes_to_string(bytes);
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", value, length).into());
-
-                    EbmlPayload::String(value)
-                },
-                EbmlType::Date => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    let bytes = self.source.read_range(offset, offset + size - 1).await;
-                    offset += size;
-
-                    let value = Self::bytes_to_int(bytes);
-
-                    EbmlPayload::Date(value)
-                },
-                EbmlType::Binary => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                    let value = if skip_binary {
-                        vec![]
-                    } else {
-                        self.source.read_range(offset, offset + size - 1).await
-                    };
-
-                    offset += size;
-
-                    EbmlPayload::Unknown(value) // unimplemented
-                },
-                EbmlType::Void => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-                    offset += size;
-
-                    EbmlPayload::Void
-                },
-                EbmlType::Unsupported => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-                    offset += size;
-
-                    EbmlPayload::Invalid(None) // unimplemented
-                },
-
-                EbmlType::Master => {
-                    let (length, size) = self.read_variable_size_uint(offset).await;
-                    offset += length;
-
-                   // web_sys::console::log_1(&format!(" > {} (Length: {})", size, length).into());
-
-                    let offset_at_size = offset;
-
-                    let mut elements: Vec<EbmlElement> = Vec::new();
-
-                    if max_recursion != 0 {
-                        while (offset < (offset_at_size + size as Size)) {
-                            let (length, element) = Box::pin(self.read_element(offset, skip_binary, max_recursion - 1)).await;
-                            offset += length;
-
-                            if let Some(element) = element {
-                                elements.push(element);
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-
-                    offset = offset_at_size + size;
-
-                   // web_sys::console::log_1(&format!("!-- MASTER DONE !-- {:#X}", id).into());
-
-                    EbmlPayload::Master(Box::new(elements))
-                }
-            };
-
-            let element = EbmlElement {
-                id,
-                size: offset - start,
-                offset: start,
-                payload
-            };
-
-
-            //// web_sys::console::log_1(&format!("llength: {}", offset - start).into());
-
-            return (offset - start, Some(element))
-        }
-
-
-        (offset - start, None)
-    }*/
 
 }
