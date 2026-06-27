@@ -48,6 +48,9 @@
         left: 50%;
       }
 
+      /* Previous/next-chapter skip buttons. */
+      .vjs-chapter-skip { font-size: 1rem; line-height: 1; padding: 0 0.45rem; }
+
       /* Custom Audio/Subtitle dropdown menus in the control bar. */
       .vjs-menu { position: relative; display: inline-flex; align-items: center; }
       .vjs-menu__trigger { font-size: 0.8125rem; padding: 0 0.6rem; min-width: auto; }
@@ -199,6 +202,8 @@
                 </media-play-button>
                 <media-tooltip id="play-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
 
+                <button type="button" id="prevChapter" class="media-button media-button--subtle vjs-chapter-skip" title="Previous chapter" aria-label="Previous chapter" hidden>⏮</button>
+
                 <media-seek-button commandfor="seek-backward-tooltip" seconds="-10" class="media-button media-button--subtle media-button--icon media-button--seek">
                   <span class="media-icon__container">
                     <media-icon name="seek" class="media-icon media-icon--flipped"></media-icon>
@@ -214,6 +219,8 @@
                   </span>
                 </media-seek-button>
                 <media-tooltip id="seek-forward-tooltip" side="top" class="media-surface media-tooltip"></media-tooltip>
+
+                <button type="button" id="nextChapter" class="media-button media-button--subtle vjs-chapter-skip" title="Next chapter" aria-label="Next chapter" hidden>⏭</button>
               </div>
 
               <div class="media-time-controls">
@@ -229,6 +236,11 @@
               </div>
 
               <div class="media-button-group">
+                <!-- Chapter menu (custom, app-driven) -->
+                <div class="vjs-menu">
+                  <button type="button" id="chaptersTrigger" class="media-button media-button--subtle vjs-menu__trigger" aria-haspopup="true" aria-expanded="false" title="Chapters" hidden>Chapters</button>
+                  <div id="chaptersMenu" class="media-surface vjs-menu__popup" role="menu" hidden></div>
+                </div>
                 <!-- Audio track menu (custom, app-driven) -->
                 <div class="vjs-menu">
                   <button type="button" id="audioTrigger" class="media-button media-button--subtle vjs-menu__trigger" aria-haspopup="true" aria-expanded="false" title="Audio track" hidden>Audio</button>

@@ -10,9 +10,12 @@ use crate::fmp4::{build_init_segment, build_media_segment, CodecConfig, MediaKin
 use crate::mem_source::MemSource;
 use crate::index::{cue_cluster_for_time, parse_cues, parse_seek_head, CuePoint};
 use crate::matroska_data::{
-    ID_ATTACHEDFILE, ID_ATTACHMENTS, ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CLUSTER, ID_CUES,
-    ID_DURATION, ID_FILEDATA, ID_FILEMEDIATYPE, ID_FILENAME, ID_FILEUID, ID_INFO, ID_REFERENCEBLOCK,
-    ID_SEEKHEAD, ID_SEGMENT, ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE, ID_TRACKS,
+    ID_ATTACHEDFILE, ID_ATTACHMENTS, ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CHAPLANGUAGE,
+    ID_CHAPLANGUAGEBCP47, ID_CHAPSTRING, ID_CHAPTERATOM, ID_CHAPTERDISPLAY, ID_CHAPTERFLAGHIDDEN,
+    ID_CHAPTERS, ID_CHAPTERTIMEEND, ID_CHAPTERTIMESTART, ID_CHAPTERUID, ID_CLUSTER, ID_CUES,
+    ID_DURATION, ID_EDITIONENTRY, ID_EDITIONFLAGDEFAULT, ID_EDITIONFLAGHIDDEN, ID_FILEDATA,
+    ID_FILEMEDIATYPE, ID_FILENAME, ID_FILEUID, ID_INFO, ID_REFERENCEBLOCK, ID_SEEKHEAD, ID_SEGMENT,
+    ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE, ID_TRACKS,
 };
 use crate::remux::{
     audio_samples, cues_to_webvtt, parse_block, video_samples, BlockFrames, SubtitleCue, TimedFrame,
@@ -25,6 +28,27 @@ const SEEK_ID_CUES: u64 = ID_CUES;
 const SEEK_ID_TRACKS: u64 = ID_TRACKS;
 const SEEK_ID_INFO: u64 = ID_INFO;
 const SEEK_ID_ATTACHMENTS: u64 = ID_ATTACHMENTS;
+const SEEK_ID_CHAPTERS: u64 = ID_CHAPTERS;
+
+/// One localized chapter title.
+#[derive(Debug, Clone)]
+pub struct ChapterDisplay {
+    pub text: String,
+    /// Legacy ISO-639 `ChapLanguage` (Matroska default `"eng"`).
+    pub language: String,
+    /// BCP-47 `ChapLanguageBCP47`, when present.
+    pub language_bcp47: Option<String>,
+}
+
+/// One `ChapterAtom`: a start (and optional end) time, plus its localized titles. JS
+/// picks the title matching the selected audio language (with fallback).
+#[derive(Debug, Clone)]
+pub struct ChapterEntry {
+    pub uid: u64,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+    pub displays: Vec<ChapterDisplay>,
+}
 
 /// One `AttachedFile`: its metadata plus the **absolute** byte range of its `FileData`.
 /// The data itself is never read here — only its range — so fonts can be fetched
@@ -76,6 +100,7 @@ where
     cues: Vec<CuePoint>,
     first_cluster_offset: Option<u64>,
     attachments: Vec<Attachment>,
+    chapters: Vec<ChapterEntry>,
 }
 
 impl<S> Demuxer<S>
@@ -93,6 +118,7 @@ where
             cues: Vec::new(),
             first_cluster_offset: None,
             attachments: Vec::new(),
+            chapters: Vec::new(),
         };
         demux.parse().await;
         demux
@@ -165,6 +191,7 @@ where
         let mut have_tracks = false;
         let mut have_cues = false;
         let mut have_attachments = false;
+        let mut have_chapters = false;
 
         // Forward scan of Segment children up to the first Cluster.
         while let Some(el) = segment.next().await {
@@ -197,6 +224,13 @@ where
                     if let EbmlPayload::Master(att) = el.payload {
                         self.attachments = parse_attachments(att).await;
                         have_attachments = true;
+                    }
+                }
+                ID_CHAPTERS => {
+                    if let EbmlPayload::Master(ch) = el.payload {
+                        let it = self.buffer_range(ch.current, ch.end.unwrap_or(self.segment_end)).await;
+                        self.chapters = parse_chapters(it).await;
+                        have_chapters = true;
                     }
                 }
                 ID_CLUSTER => {
@@ -233,6 +267,12 @@ where
                     if let Some(it) = self.master_at(abs).await {
                         self.attachments = parse_attachments(it).await;
                         have_attachments = true;
+                    }
+                }
+                SEEK_ID_CHAPTERS if !have_chapters => {
+                    if let Some(it) = self.buffered_master_at(abs).await {
+                        self.chapters = parse_chapters(it).await;
+                        have_chapters = true;
                     }
                 }
                 _ => {}
@@ -456,6 +496,41 @@ where
                 a.uid,
                 a.data_start,
                 a.data_end,
+            ));
+        }
+        format!("[{}]", items.join(","))
+    }
+
+    /// JSON list of chapters (chosen edition), each with all localized titles so JS can
+    /// pick one by the selected audio language:
+    /// `[{"startMs":N,"endMs":N|null,"uid":N,"displays":[{"text":"…","language":"eng","languageBcp47":"en"}]}]`.
+    pub fn chapters_json(&self) -> String {
+        let mut items = Vec::new();
+        for c in &self.chapters {
+            let displays: Vec<String> = c
+                .displays
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"text\":\"{}\",\"language\":\"{}\",\"languageBcp47\":{}}}",
+                        json_escape(&d.text),
+                        json_escape(&d.language),
+                        match &d.language_bcp47 {
+                            Some(l) => format!("\"{}\"", json_escape(l)),
+                            None => "null".to_string(),
+                        },
+                    )
+                })
+                .collect();
+            items.push(format!(
+                "{{\"uid\":{},\"startMs\":{},\"endMs\":{},\"displays\":[{}]}}",
+                c.uid,
+                c.start_ms,
+                match c.end_ms {
+                    Some(e) => e.to_string(),
+                    None => "null".to_string(),
+                },
+                displays.join(","),
             ));
         }
         format!("[{}]", items.join(","))
@@ -775,6 +850,108 @@ where
     out
 }
 
+/// Parse a `Chapters` master into the chosen edition's top-level chapters. Prefers the
+/// edition flagged default, else the first non-hidden one. Nested chapters are not
+/// flattened (rare for playback menus).
+async fn parse_chapters<S>(mut chapters: EbmlIterator<S>) -> Vec<ChapterEntry>
+where
+    S: EbmlSource + PartialEq + Clone,
+{
+    let mut default_edition: Option<Vec<ChapterEntry>> = None;
+    let mut first_edition: Option<Vec<ChapterEntry>> = None;
+    while let Some(el) = chapters.next().await {
+        if el.id != ID_EDITIONENTRY {
+            continue;
+        }
+        let EbmlPayload::Master(mut ed) = el.payload else {
+            continue;
+        };
+        let mut is_default = false;
+        let mut is_hidden = false;
+        let mut atoms = Vec::new();
+        while let Some(field) = ed.next().await {
+            match field.payload {
+                EbmlPayload::UnsignedInt(v) if field.id == ID_EDITIONFLAGDEFAULT => is_default = v != 0,
+                EbmlPayload::UnsignedInt(v) if field.id == ID_EDITIONFLAGHIDDEN => is_hidden = v != 0,
+                EbmlPayload::Master(atom) if field.id == ID_CHAPTERATOM => {
+                    if let Some(c) = parse_chapter_atom(atom).await {
+                        atoms.push(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if is_hidden || atoms.is_empty() {
+            continue;
+        }
+        atoms.sort_by_key(|c| c.start_ms);
+        if is_default {
+            default_edition.get_or_insert(atoms);
+        } else if first_edition.is_none() {
+            first_edition = Some(atoms);
+        }
+    }
+    default_edition.or(first_edition).unwrap_or_default()
+}
+
+async fn parse_chapter_atom<S>(mut atom: EbmlIterator<S>) -> Option<ChapterEntry>
+where
+    S: EbmlSource + PartialEq + Clone,
+{
+    let mut uid = 0u64;
+    let mut start_ns: Option<u64> = None;
+    let mut end_ns: Option<u64> = None;
+    let mut hidden = false;
+    let mut displays = Vec::new();
+    while let Some(field) = atom.next().await {
+        match field.payload {
+            EbmlPayload::UnsignedInt(v) if field.id == ID_CHAPTERUID => uid = v,
+            EbmlPayload::UnsignedInt(v) if field.id == ID_CHAPTERTIMESTART => start_ns = Some(v),
+            EbmlPayload::UnsignedInt(v) if field.id == ID_CHAPTERTIMEEND => end_ns = Some(v),
+            EbmlPayload::UnsignedInt(v) if field.id == ID_CHAPTERFLAGHIDDEN => hidden = v != 0,
+            EbmlPayload::Master(disp) if field.id == ID_CHAPTERDISPLAY => {
+                if let Some(d) = parse_chapter_display(disp).await {
+                    displays.push(d);
+                }
+            }
+            _ => {}
+        }
+    }
+    if hidden {
+        return None;
+    }
+    // ChapterTimeStart/End are absolute nanoseconds (not TimestampScale-scaled).
+    let start_ns = start_ns?;
+    Some(ChapterEntry {
+        uid,
+        start_ms: start_ns / 1_000_000,
+        end_ms: end_ns.map(|n| n / 1_000_000),
+        displays,
+    })
+}
+
+async fn parse_chapter_display<S>(mut disp: EbmlIterator<S>) -> Option<ChapterDisplay>
+where
+    S: EbmlSource + PartialEq + Clone,
+{
+    let mut text: Option<String> = None;
+    let mut language: Option<String> = None;
+    let mut language_bcp47: Option<String> = None;
+    while let Some(field) = disp.next().await {
+        match field.payload {
+            EbmlPayload::String(s) if field.id == ID_CHAPSTRING => text = Some(s),
+            EbmlPayload::String(s) if field.id == ID_CHAPLANGUAGE => language = Some(s),
+            EbmlPayload::String(s) if field.id == ID_CHAPLANGUAGEBCP47 => language_bcp47 = Some(s),
+            _ => {}
+        }
+    }
+    Some(ChapterDisplay {
+        text: text?,
+        language: language.unwrap_or_else(|| "eng".to_string()),
+        language_bcp47,
+    })
+}
+
 fn samples_per_frame(codec_id: Option<&str>, codec_private: Option<&[u8]>) -> u32 {
     match codec_id {
         Some("A_OPUS") => 960,
@@ -870,6 +1047,11 @@ mod wasm {
         /// JSON list of font attachments (name, mime, uid, absolute data byte range).
         pub fn font_attachments(&self) -> String {
             self.0.font_attachments_json()
+        }
+
+        /// JSON list of chapters (chosen edition) with all localized titles.
+        pub fn chapters(&self) -> String {
+            self.0.chapters_json()
         }
 
         /// The ASS/SSA header (`CodecPrivate`) for a subtitle track, or `None`.

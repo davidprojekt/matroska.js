@@ -28,6 +28,13 @@ const subsMenu = new TrackMenu(
   document.getElementById('subsMenu'),
   (v) => onSubSelect(v)
 );
+const chapterMenu = new TrackMenu(
+  document.getElementById('chaptersTrigger'),
+  document.getElementById('chaptersMenu'),
+  (v) => onChapterSelect(v)
+);
+const prevChapterBtn = document.getElementById('prevChapter');
+const nextChapterBtn = document.getElementById('nextChapter');
 const magnetInput = document.getElementById('magnet');
 const torrentFileInput = document.getElementById('torrentFile');
 const fetchTorrentBtn = document.getElementById('fetchTorrent');
@@ -45,6 +52,7 @@ const subKind = (t) =>
 let activePlayer = null;
 let assSubs = null; // AssSubtitleController for the current file
 let trackList = []; // parsed tracks of the current file (for forced-sub matching)
+let chapterList = []; // parsed chapters of the current file
 let userChoseSub = false; // true once the user explicitly picks a subtitle/Off
 const loadedSubs = new Map(); // track number → HTMLTrackElement (text path)
 const subtitleInfo = new Map(); // track number → { language, name }
@@ -136,12 +144,16 @@ async function load(url, { skipPreflight = false } = {}) {
   audioMenu.setAvailable(false);
   subsMenu.setItems([]);
   subsMenu.setAvailable(false);
+  chapterMenu.setItems([]);
+  chapterMenu.setAvailable(false);
+  chapterList = [];
 
   const player = await MatroskaPlayer.open(url);
   activePlayer = player;
   assSubs = new AssSubtitleController(video);
   const tracks = JSON.parse(player.tracks());
   trackList = tracks;
+  chapterList = JSON.parse(player.chapters());
   const durationMs = Number(player.duration_ms());
   const cueTimes = JSON.parse(player.cue_times()).map(Number);
 
@@ -165,6 +177,9 @@ async function load(url, { skipPreflight = false } = {}) {
     }))
   );
   audioMenu.setAvailable(audioTracks.length > 0);
+
+  // Chapter menu — titles in the starting audio's language (rebuilt on audio change).
+  buildChapterMenu(defaultAudio ? defaultAudio.language : null);
 
   // ASS tracks render via libass. Plain-text subs are listed but disabled (the WebVTT
   // path is not wired into the libass overlay yet).
@@ -264,12 +279,93 @@ async function selectSubtitle(value) {
 function onAudioSelect(number) {
   if (controller) controller.switchAudio(number);
   const t = trackList.find((x) => x.number === number);
-  if (t) applyForcedSubtitle(t.language);
+  if (t) {
+    applyForcedSubtitle(t.language);
+    buildChapterMenu(t.language); // re-pick chapter titles for the new audio language
+  }
 }
 
 function onSubSelect(value) {
   userChoseSub = true; // explicit choice — forced-subtitle logic must not override it
   selectSubtitle(value);
+}
+
+// ---- Chapters ----
+
+// Pick a chapter's title in the audio language (BCP-47 then ISO-639), else the first.
+function pickChapterTitle(chapter, audioLang) {
+  const displays = chapter.displays || [];
+  if (audioLang) {
+    const m = displays.find((d) => langMatch(d.languageBcp47 || d.language, audioLang));
+    if (m) return m.text;
+  }
+  return (displays[0] && displays[0].text) || 'Chapter';
+}
+
+// ms → `m:ss` or `h:mm:ss`.
+function fmtChapterTime(ms) {
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
+function buildChapterMenu(audioLang) {
+  chapterMenu.setItems(
+    chapterList.map((c) => ({
+      value: String(c.startMs),
+      label: `${fmtChapterTime(c.startMs)}  ${pickChapterTitle(c, audioLang)}`,
+    }))
+  );
+  const has = chapterList.length > 0;
+  chapterMenu.setAvailable(has);
+  if (prevChapterBtn) prevChapterBtn.hidden = !has;
+  if (nextChapterBtn) nextChapterBtn.hidden = !has;
+  highlightCurrentChapter();
+}
+
+const seekTo = (seconds) => {
+  if (Number.isFinite(seconds)) video.currentTime = Math.max(0, seconds);
+};
+
+function onChapterSelect(value) {
+  seekTo(Number(value) / 1000);
+}
+
+// Index of the chapter containing `ms` (largest startMs ≤ ms), or -1 before the first.
+function currentChapterIndex(ms) {
+  let idx = -1;
+  for (let i = 0; i < chapterList.length; i++) {
+    if (chapterList[i].startMs <= ms + 1) idx = i;
+    else break;
+  }
+  return idx;
+}
+
+// Highlight the current chapter in the menu as playback progresses.
+function highlightCurrentChapter() {
+  if (!chapterList.length) return;
+  const idx = currentChapterIndex(video.currentTime * 1000);
+  chapterMenu.setValue(idx >= 0 ? String(chapterList[idx].startMs) : null);
+}
+
+function goToNextChapter() {
+  const ms = video.currentTime * 1000;
+  const next = chapterList.find((c) => c.startMs > ms + 250);
+  if (next) seekTo(next.startMs / 1000);
+}
+
+function goToPrevChapter() {
+  const ms = video.currentTime * 1000;
+  const idx = currentChapterIndex(ms);
+  if (idx <= 0) {
+    seekTo(0);
+    return;
+  }
+  // >3s into the current chapter restarts it; otherwise jump to the previous one.
+  const restart = ms - chapterList[idx].startMs > 3000;
+  seekTo(chapterList[restart ? idx : idx - 1].startMs / 1000);
 }
 
 // Fetch font attachments out-of-band (one Range request each, parallel, on separate
@@ -332,6 +428,10 @@ function reportTracks(tracks) {
   );
   console.log('Tracks:\n' + lines.join('\n'));
 }
+
+prevChapterBtn.addEventListener('click', goToPrevChapter);
+nextChapterBtn.addEventListener('click', goToNextChapter);
+video.addEventListener('timeupdate', highlightCurrentChapter);
 
 loadBtn.addEventListener('click', () => {
   load(urlInput.value.trim()).catch((e) => {
