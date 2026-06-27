@@ -35,6 +35,7 @@ const chapterMenu = new TrackMenu(
 );
 const prevChapterBtn = document.getElementById('prevChapter');
 const nextChapterBtn = document.getElementById('nextChapter');
+const chapterMarkersEl = document.getElementById('chapterMarkers');
 const magnetInput = document.getElementById('magnet');
 const torrentFileInput = document.getElementById('torrentFile');
 const fetchTorrentBtn = document.getElementById('fetchTorrent');
@@ -147,6 +148,7 @@ async function load(url, { skipPreflight = false } = {}) {
   chapterMenu.setItems([]);
   chapterMenu.setAvailable(false);
   chapterList = [];
+  if (chapterMarkersEl) chapterMarkersEl.textContent = '';
 
   const player = await MatroskaPlayer.open(url);
   activePlayer = player;
@@ -180,6 +182,7 @@ async function load(url, { skipPreflight = false } = {}) {
 
   // Chapter menu — titles in the starting audio's language (rebuilt on audio change).
   buildChapterMenu(defaultAudio ? defaultAudio.language : null);
+  buildChapterMarkers(durationMs);
 
   // ASS tracks render via libass. Plain-text subs are listed but disabled (the WebVTT
   // path is not wired into the libass overlay yet).
@@ -323,6 +326,20 @@ function buildChapterMenu(audioLang) {
   if (prevChapterBtn) prevChapterBtn.hidden = !has;
   if (nextChapterBtn) nextChapterBtn.hidden = !has;
   highlightCurrentChapter();
+}
+
+// Place a tick on the time slider at each chapter boundary (positioned by % of duration).
+function buildChapterMarkers(durationMs) {
+  if (!chapterMarkersEl) return;
+  chapterMarkersEl.textContent = '';
+  if (!chapterList.length || !(durationMs > 0)) return;
+  for (const c of chapterList) {
+    if (c.startMs <= 0 || c.startMs >= durationMs) continue; // skip the implicit start
+    const tick = document.createElement('div');
+    tick.className = 'vjs-chapter-marker';
+    tick.style.left = `${(c.startMs / durationMs) * 100}%`;
+    chapterMarkersEl.appendChild(tick);
+  }
 }
 
 const seekTo = (seconds) => {

@@ -51,6 +51,11 @@
       /* Previous/next-chapter skip buttons. */
       .vjs-chapter-skip { font-size: 1rem; line-height: 1; padding: 0 0.45rem; }
 
+      /* Chapter boundary ticks overlaid on the time slider. Non-interactive so seeking
+         still works; sits above the track/fill but below the thumb. */
+      .vjs-chapter-markers { position: absolute; inset-inline: 0; top: 50%; height: 0.7rem; transform: translateY(-50%); pointer-events: none; z-index: 5; }
+      .vjs-chapter-marker { position: absolute; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); background: color-mix(in srgb, currentColor 55%, transparent); border-radius: 1px; }
+
       /* Custom Audio/Subtitle dropdown menus in the control bar. */
       .vjs-menu { position: relative; display: inline-flex; align-items: center; }
       .vjs-menu__trigger { font-size: 0.8125rem; padding: 0 0.6rem; min-width: auto; }
@@ -230,6 +235,7 @@
                     <media-slider-fill class="media-slider__fill"></media-slider-fill>
                     <media-slider-buffer class="media-slider__buffer"></media-slider-buffer>
                   </media-slider-track>
+                  <div class="vjs-chapter-markers" id="chapterMarkers"></div>
                   <media-slider-thumb class="media-slider__thumb"></media-slider-thumb>
                 </media-time-slider>
                 <media-time type="duration" class="media-time"></media-time>
