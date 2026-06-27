@@ -9,7 +9,7 @@
     "predev": "npm run copy-sw",
     "prebuild": "npm run copy-sw",
     "dev": "vite",
-    "build": "vite build",
+    "build": "bash -c 'cd ../ebml-wasm && npm run build' && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
