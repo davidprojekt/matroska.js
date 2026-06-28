@@ -117,7 +117,7 @@ impl TrackData {
         match codec_id {
             "V_MPEG4/ISO/AVC" => Some(avc_codec_string(cp?)),
             "V_MPEGH/ISO/HEVC" => Some(hevc_codec_string(cp?)),
-            "V_VP9" => Some("vp09.00.10.08".to_string()),
+            "V_VP9" => Some(self.vp9_codec_string()),
             "V_AV1" => Some(av1_codec_string(cp)),
             "A_AAC" => Some(aac_codec_string(cp)),
             "A_OPUS" => Some("opus".to_string()),
@@ -145,6 +145,79 @@ impl TrackData {
             "A_MPEG/L3" => "mp4a",
             _ => return None,
         })
+    }
+
+    /// `vp09.PP.LL.DD` for VP9. Profile, level, and bit depth come from the VP9
+    /// codec feature metadata in CodecPrivate when present; otherwise Profile 0 /
+    /// 8-bit is assumed and the level is computed from the frame size and rate.
+    /// Unlike a fixed string, this lets `isTypeSupported` judge the real stream
+    /// (e.g. a 10-bit Profile 2 clip reports `vp09.02.LL.10`, not `vp09.00.10.08`).
+    fn vp9_codec_string(&self) -> String {
+        let mut profile: u8 = 0;
+        let mut level: Option<u8> = None;
+        let mut bit_depth: u8 = 8;
+
+        // WebM VP9 CodecPrivate (when present) is a sequence of [id:1][len:1][value:len]
+        // fields: id 1 = Profile, 2 = Level, 3 = Bit Depth.
+        if let Some(cp) = self.codec_private.as_deref() {
+            let mut i = 0;
+            while i + 2 <= cp.len() {
+                let id = cp[i];
+                let len = cp[i + 1] as usize;
+                if let Some(v) = cp.get(i + 2..i + 2 + len).and_then(<[u8]>::first).copied() {
+                    match id {
+                        1 => profile = v,
+                        2 => level = Some(v),
+                        3 => bit_depth = v,
+                        _ => {}
+                    }
+                }
+                i += 2 + len;
+            }
+        }
+
+        let level = level.unwrap_or_else(|| self.vp9_level());
+        format!("vp09.{:02}.{:02}.{:02}", profile, level, bit_depth)
+    }
+
+    /// Lowest VP9 level (per the spec's level table) whose limits cover this track's
+    /// luma picture size and sample rate. Frame rate comes from `DefaultDuration`
+    /// (defaulting to 30 fps when absent); unknown dimensions yield level 1.0.
+    fn vp9_level(&self) -> u8 {
+        let picture_size = self
+            .pixel_width
+            .unwrap_or(0)
+            .saturating_mul(self.pixel_height.unwrap_or(0));
+        let fps = self
+            .default_duration
+            .filter(|&d| d > 0)
+            .map(|d| 1_000_000_000.0 / d as f64)
+            .unwrap_or(30.0);
+        let sample_rate = picture_size as f64 * fps;
+
+        // (level, max luma sample rate, max luma picture size) — VP9 spec Table.
+        const LEVELS: &[(u8, f64, u64)] = &[
+            (10, 829_440.0, 36_864),
+            (11, 2_764_800.0, 73_728),
+            (20, 4_608_000.0, 122_880),
+            (21, 9_216_000.0, 245_760),
+            (30, 20_736_000.0, 552_960),
+            (31, 36_864_000.0, 983_040),
+            (40, 83_558_400.0, 2_228_224),
+            (41, 160_432_128.0, 2_228_224),
+            (50, 311_951_360.0, 8_912_896),
+            (51, 588_251_136.0, 8_912_896),
+            (52, 1_176_502_272.0, 8_912_896),
+            (60, 1_176_502_272.0, 35_651_584),
+            (61, 2_353_004_544.0, 35_651_584),
+            (62, 4_706_009_088.0, 35_651_584),
+        ];
+        for &(level, max_rate, max_size) in LEVELS {
+            if picture_size <= max_size && sample_rate <= max_rate {
+                return level;
+            }
+        }
+        62
     }
 }
 
