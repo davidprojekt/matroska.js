@@ -4,3 +4,6 @@ dist/
 
 # Copied from node_modules/webtorrent/dist by the `copy-sw` script (pre dev/build).
 public/sw.min.js
+
+# Copied from node_modules/@ffmpeg/core by setup-ffmpeg-core.mjs (pre dev/build).
+public/ffmpeg/

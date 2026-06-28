@@ -6,8 +6,9 @@
   "description": "Browser MKV player: WASM MKV→fMP4 remux + MSE + video.js v10",
   "scripts": {
     "copy-sw": "node -e \"require('fs').copyFileSync('node_modules/webtorrent/dist/sw.min.js','public/sw.min.js')\"",
-    "predev": "npm run copy-sw",
-    "prebuild": "npm run copy-sw",
+    "setup-ffmpeg": "node scripts/setup-ffmpeg-core.mjs",
+    "predev": "npm run copy-sw && npm run setup-ffmpeg",
+    "prebuild": "npm run copy-sw && npm run setup-ffmpeg",
     "dev": "vite",
     "build": "bash -c 'cd ../mkv-player && npm run build' && vite build",
     "preview": "vite preview"
@@ -17,6 +18,11 @@
     "mkv-player": "file:../mkv-player/pkg",
     "jassub": "^2.5.6",
     "webtorrent": "^3.0.16"
+  },
+  "optionalDependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
+    "@ffmpeg/core": "^0.12.10"
   },
   "devDependencies": {
     "vite": "^6.0.0"

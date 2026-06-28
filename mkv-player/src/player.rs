@@ -395,6 +395,44 @@ where
         Some(build_media_segment(track_number as u32, seq, base, &samples))
     }
 
+    /// Emit a self-contained Matroska chunk for `[start_ms, end_ms)` of an audio
+    /// `track_number`, for in-browser transcoding (ffmpeg.wasm) of codecs MSE can't
+    /// decode natively. Mirrors [`Self::media_segment`]'s frame collection, but
+    /// repackages the raw frames into a minimal MKV (header + Info + Tracks +
+    /// Cluster(s)) so ffmpeg — given the codec + CodecPrivate context — can decode and
+    /// re-encode them. Returns `(base_seconds, mkv_bytes)`: the chunk's timeline is
+    /// zero-anchored (ffmpeg normalizes the first packet to 0 regardless), and
+    /// `base_seconds` is its true start on the media timeline so the caller can place
+    /// the transcoded fragment with `SourceBuffer.timestampOffset`.
+    pub async fn audio_chunk(
+        &self,
+        track_number: u64,
+        start_ms: u64,
+        end_ms: u64,
+    ) -> Option<(f64, Vec<u8>)> {
+        let track = self.track(track_number)?.clone();
+        if track.track_type != Some(TrackType::Audio) {
+            return None;
+        }
+        let start_offset = self.cue_offset(track_number, start_ms)?;
+        let frames = self.collect_frames(track_number, start_offset, end_ms).await;
+        if frames.is_empty() {
+            return None;
+        }
+        let base_seconds = frames[0].pts_ticks.max(0) as f64 * self.timestamp_scale_ns as f64 / 1e9;
+        let params = crate::mkv_write::AudioChunkParams {
+            timestamp_scale_ns: self.timestamp_scale_ns,
+            codec_id: track.codec_id.as_deref().unwrap_or(""),
+            codec_private: track.codec_private.as_deref(),
+            sample_rate: track.sampling_frequency.unwrap_or(48000.0),
+            channels: track.channels.unwrap_or(2),
+            bit_depth: track.bit_depth,
+            codec_delay_ns: track.codec_delay,
+            seek_preroll_ns: track.seek_preroll,
+        };
+        Some((base_seconds, crate::mkv_write::build_audio_chunk(&params, &frames)))
+    }
+
     /// Walk clusters from `start_offset`, gathering this track's frames (with
     /// absolute PTS in MKV ticks) until a frame's presentation time reaches `end_ms`.
     /// Each cluster is read in a single request and parsed from memory.
@@ -1012,6 +1050,28 @@ mod wasm {
     #[wasm_bindgen]
     pub struct MatroskaPlayer(Demuxer<StreamSource>);
 
+    /// A transcoding input chunk: a self-contained Matroska blob plus its true start
+    /// time on the media timeline. JS transcodes `data` with ffmpeg.wasm and appends
+    /// the result at `base_seconds` via `SourceBuffer.timestampOffset`.
+    #[wasm_bindgen]
+    pub struct AudioChunk {
+        base_seconds: f64,
+        data: Vec<u8>,
+    }
+
+    #[wasm_bindgen]
+    impl AudioChunk {
+        #[wasm_bindgen(getter)]
+        pub fn base_seconds(&self) -> f64 {
+            self.base_seconds
+        }
+        /// The Matroska bytes (moved out; call once).
+        #[wasm_bindgen(getter)]
+        pub fn data(&mut self) -> Box<[u8]> {
+            std::mem::take(&mut self.data).into_boxed_slice()
+        }
+    }
+
     #[wasm_bindgen]
     impl MatroskaPlayer {
         pub async fn open(url: String) -> MatroskaPlayer {
@@ -1039,6 +1099,21 @@ mod wasm {
                 .media_segment(track_number, start_ms, end_ms)
                 .await
                 .map(|v| v.into_boxed_slice())
+        }
+
+        /// Self-contained Matroska chunk for `[start_ms, end_ms)` of an audio track,
+        /// for in-browser transcoding (see [`Demuxer::audio_chunk`]). Returns an
+        /// [`AudioChunk`] (bytes + base time) or `None` for non-audio / empty windows.
+        pub async fn audio_chunk(
+            &self,
+            track_number: u64,
+            start_ms: u64,
+            end_ms: u64,
+        ) -> Option<AudioChunk> {
+            self.0
+                .audio_chunk(track_number, start_ms, end_ms)
+                .await
+                .map(|(base_seconds, data)| AudioChunk { base_seconds, data })
         }
 
         pub fn cue_offset(&self, track_number: u64, time_ms: u64) -> Option<u64> {

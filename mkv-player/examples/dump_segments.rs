@@ -17,6 +17,9 @@ fn main() {
     let file = args.get(1).expect("usage: dump_segments <file.mkv> <out_dir> [track]");
     let out_dir = args.get(2).map(String::as_str).unwrap_or("/tmp/mkv_dump");
     let only_track: Option<u64> = args.get(3).and_then(|s| s.parse().ok());
+    // Optional audio-chunk window (ms) for exercising the transcoding path.
+    let chunk_start: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let chunk_end: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(8000);
 
     fs::create_dir_all(out_dir).unwrap();
 
@@ -48,8 +51,22 @@ fn main() {
             }
             let kind = field_str(entry, "\"type\":\"");
             let mime = field_str(entry, "\"mime\":\"");
+
+            // Audio chunk (for in-browser transcoding): emit a self-contained MKV for
+            // [0,8s] of every audio track so native ffmpeg can validate it round-trips.
+            if kind == "audio" {
+                if let Some((base, chunk)) = demux.audio_chunk(number, chunk_start, chunk_end).await {
+                    let chunk_path = format!("{}/chunk_{}.mkv", out_dir, number);
+                    fs::write(&chunk_path, &chunk).unwrap();
+                    println!(
+                        "track {number} (audio): chunk [{}..{}ms] base={:.3}s {} B → {}",
+                        chunk_start, chunk_end, base, chunk.len(), chunk_path
+                    );
+                }
+            }
+
             if mime.is_empty() {
-                println!("track {number} ({kind}): no MP4 mime — skipping");
+                println!("track {number} ({kind}): no MP4 mime — skipping fMP4 dump");
                 continue;
             }
 
