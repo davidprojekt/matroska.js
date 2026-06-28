@@ -334,6 +334,48 @@ mod tests {
         assert_eq!(total, 4);
     }
 
+    // Presentation end of a segment on the MKV-tick timeline:
+    // base + sum(sample durations). For seamless MSE playback this must equal the
+    // next segment's `base`; any shortfall is a gap the playhead can stall on.
+    fn segment_end(base: u64, samples: &[Sample]) -> u64 {
+        base + samples.iter().map(|s| s.duration as u64).sum::<u64>()
+    }
+
+    fn frames_at(pts: &[i64]) -> Vec<TimedFrame> {
+        pts.iter()
+            .enumerate()
+            .map(|(i, &p)| TimedFrame { pts_ticks: p, data: vec![i as u8], is_keyframe: i == 0 })
+            .collect()
+    }
+
+    // Two adjacent ~24fps windows (frame interval 41 ticks at a 1ms timescale).
+    // With the correct frame duration the segments tile seamlessly; with the
+    // `default_duration`-missing fallback of 1 tick, every boundary leaves a
+    // ~one-frame hole — the gap that strands the playhead and makes the JS
+    // topUp() loop over-download the rest of the file. See player.rs:387.
+    #[test]
+    fn missing_default_duration_leaves_inter_segment_gap() {
+        let win1 = frames_at(&[0, 41, 82, 123, 164]);
+        let win2 = frames_at(&[205, 246, 287]);
+        const FRAME_DUR: i64 = 41;
+
+        // Correct frame duration → contiguous: seg1 end == seg2 base.
+        let (base1, s1) = video_samples(&win1, FRAME_DUR);
+        let (base2, _s2) = video_samples(&win2, FRAME_DUR);
+        assert_eq!(base2, 205);
+        assert_eq!(
+            segment_end(base1, &s1),
+            base2,
+            "real DefaultDuration should tile seamlessly"
+        );
+
+        // Fallback (no DefaultDuration → frame_dur = 1) → gap before next segment.
+        let (base1b, s1b) = video_samples(&win1, 1);
+        let end_b = segment_end(base1b, &s1b);
+        assert!(end_b < base2, "fallback under-runs the next segment base");
+        assert_eq!(base2 - end_b, (FRAME_DUR - 1) as u64, "gap is ~one frame interval");
+    }
+
     #[test]
     fn webvtt_timestamps_use_dot_separator() {
         let cues = vec![SubtitleCue { start_ms: 61_500, end_ms: 65_000, text: "Hi".into() }];
