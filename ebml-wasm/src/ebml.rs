@@ -156,14 +156,52 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
         let (length, id) = self.ebml.read_variable_size_id(self.current).await;
         self.current += length;
 
-        let (length, size) = self.ebml.read_variable_size_uint(self.current).await;
+        let (length, size) = self.ebml.read_variable_size_data_size(self.current).await;
         self.current += length;
 
         if let Some(ebml_type) = self.ebml.id_map.get(&id) {
            // web_sys::console::log_1(&format!(" > {:?}", ebml_type).into());
 
-            let payload: EbmlPayload<S> = match ebml_type {
-                EbmlType::SignedInteger => {
+            let payload: EbmlPayload<S> = match (ebml_type, size) {
+                // A Master Element may legitimately have an unknown size
+                // (RFC 8794 §6.2): it then extends until an element that is not
+                // a valid child, or the end of its parent. We expose it as an
+                // endless iterator (`end: None`), which downstream consumers
+                // already cap at the parent's end via `end.unwrap_or(...)`.
+                //
+                // We cannot determine the exact end without element-hierarchy
+                // knowledge, so we assume it runs to the end of this parent.
+                // This covers the common single trailing master (Segment, or a
+                // final Cluster); multiple unknown-size sibling masters (live
+                // streaming) are not resolved here.
+                (EbmlType::Master, None) => {
+                    let elements: EbmlIterator<S> = EbmlIterator::new_endless(self.current, self.ebml.clone());
+
+                    self.current = self.end.unwrap_or(u64::MAX);
+
+                    EbmlPayload::Master(elements)
+                }
+                (EbmlType::Master, Some(size)) => {
+                    let offset_at_size = self.current;
+
+                    let elements: EbmlIterator<S> = EbmlIterator::new(self.current, offset_at_size + size, self.ebml.clone());
+
+                    self.current = offset_at_size + size;
+
+                    EbmlPayload::Master(elements)
+                }
+
+                // An unknown-size Void is not meaningful: instead of skipping a
+                // bogus (maximal) amount and losing every following element, we
+                // resume parsing right after the header.
+                (EbmlType::Void, None) => EbmlPayload::Void,
+                (EbmlType::Void, Some(size)) => {
+                    self.current += size;
+
+                    EbmlPayload::Void
+                },
+
+                (EbmlType::SignedInteger, Some(size)) => {
                     if size > 8 {
                         self.current += size;
                         return None;
@@ -171,13 +209,12 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     self.current += size;
-                    self.current += size;
 
                     let value = Ebml::<S>::bytes_to_int(bytes);
 
                     EbmlPayload::SignedInt(value)
                 }
-                EbmlType::UnsignedInteger => {
+                (EbmlType::UnsignedInteger, Some(size)) => {
                     if size > 8 {
                         self.current += size;
                         return None;
@@ -190,7 +227,7 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     EbmlPayload::UnsignedInt(value)
                 }
-                EbmlType::Float => {
+                (EbmlType::Float, Some(size)) => {
                     let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     self.current += size;
 
@@ -198,7 +235,7 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     EbmlPayload::Float(value)
                 },
-                EbmlType::String => {
+                (EbmlType::String, Some(size)) | (EbmlType::UTF8, Some(size)) => {
                     let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     self.current += size;
 
@@ -206,15 +243,7 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     EbmlPayload::String(value)
                 },
-                EbmlType::UTF8 => {
-                    let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
-                    self.current += size;
-
-                    let value = Ebml::<S>::bytes_to_string(bytes);
-
-                    EbmlPayload::String(value)
-                },
-                EbmlType::Date => {
+                (EbmlType::Date, Some(size)) => {
                     let bytes = self.ebml.source.read_range(self.current, self.current + size - 1).await;
                     self.current += size;
 
@@ -222,31 +251,22 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> EbmlIterator<S> {
 
                     EbmlPayload::Date(value)
                 },
-                EbmlType::Binary => {
+                (EbmlType::Binary, Some(size)) => {
                     let offset_at_size = self.current;
                     self.current += size;
 
                     EbmlPayload::Binary((offset_at_size, offset_at_size + size - 1))
                 },
-                EbmlType::Void => {
-                    self.current += size;
-
-                    EbmlPayload::Void
-                },
-                EbmlType::Unsupported => {
+                (EbmlType::Unsupported, Some(size)) => {
                     self.current += size;
 
                     EbmlPayload::Invalid(None) // unimplemented
                 },
-                EbmlType::Master => {
-                    let offset_at_size = self.current;
 
-                    let elements: EbmlIterator<S> = EbmlIterator::new(self.current, offset_at_size + size, self.ebml.clone());
-
-                    self.current = offset_at_size + size;
-
-                    EbmlPayload::Master(elements)
-                }
+                // Any non-Master element with an unknown size is invalid per the
+                // spec. Don't skip ahead; resume right after the header so the
+                // remaining siblings stay parseable.
+                (_, None) => EbmlPayload::Invalid(None),
             };
 
             let element = EbmlElement {
@@ -349,11 +369,10 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
             return (0, Vec::new())
         }
 
-        if octet_length == 8 {
-            return (octet_length, raw_bytes)
-        }
-
-        let mask = 0xFF >> octet_length;
+        // Clear the VINT_WIDTH + VINT_MARKER bits in the leading octet so only
+        // the VINT_DATA bits remain. For an 8-octet VINT the entire first octet
+        // is the descriptor (0x01), so the whole byte is masked out.
+        let mask: u8 = if octet_length >= 8 { 0x00 } else { 0xFF >> octet_length };
         raw_bytes[0] &= mask;
 
         (octet_length, raw_bytes)
@@ -381,4 +400,100 @@ impl<S: EbmlSource + std::cmp::PartialEq + std::clone::Clone> Ebml<S> {
         (octet_length, integer_result)
     }
 
+    /// Reads an EBML Element Data Size (a VINT) at `start`.
+    ///
+    /// Returns `(octet_length, size)`. Per RFC 8794 §6.2, a VINT whose
+    /// VINT_DATA bits are *all* set to 1 is the reserved "unknown size"
+    /// marker; in that case `size` is `None` instead of the (otherwise
+    /// maximal) integer value those bits would represent.
+    pub async fn read_variable_size_data_size(&self, start: Size) -> (Size, Option<u64>) {
+        let (octet_length, raw_bytes) = self.read_variable_size_octects_masked(start).await;
+
+        if octet_length == 0 {
+            return (0, Some(0));
+        }
+
+        let mut bytes: [u8; 8] = [0; 8];
+        let offset = 8 - raw_bytes.len();
+        bytes[offset..].copy_from_slice(raw_bytes.as_slice());
+        let value = u64::from_be_bytes(bytes);
+
+        // The number of usable VINT_DATA bits is 7 per octet.
+        let data_bits = 7 * octet_length;
+        let all_ones = if data_bits >= 64 { u64::MAX } else { (1u64 << data_bits) - 1 };
+
+        let size = if value == all_ones { None } else { Some(value) };
+
+        (octet_length, size)
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::matroska_data::{ID_TIMESTAMP, ID_VOID};
+    use crate::mem_source::MemSource;
+
+    fn ebml(data: Vec<u8>) -> Ebml<MemSource> {
+        let mut id_map = HashMap::new();
+        id_map.insert(ID_VOID, EbmlType::Void);
+        id_map.insert(ID_TIMESTAMP, EbmlType::UnsignedInteger);
+        Ebml::new(MemSource::new(data, 0), id_map)
+    }
+
+    /// Regression test: a Void element with an *unknown* data size (0xFF) must
+    /// not swallow the elements that follow it.
+    #[test]
+    fn unknown_size_void_does_not_eat_following_elements() {
+        // 0xEC 0xFF                -> Void, unknown size
+        // 0xE7 0x81 0x2A           -> Timestamp (UnsignedInteger) = 42
+        let data = vec![0xEC, 0xFF, 0xE7, 0x81, 0x2A];
+        let mut it = EbmlIterator::new_endless(0, ebml(data));
+
+        let void = pollster::block_on(it.next()).expect("void element");
+        assert_eq!(void.id, ID_VOID);
+        assert!(matches!(void.payload, EbmlPayload::Void));
+        // The Void only consumed its 2-byte header, nothing more.
+        assert_eq!(void.size, 2);
+
+        let ts = pollster::block_on(it.next()).expect("timestamp element");
+        assert_eq!(ts.id, ID_TIMESTAMP);
+        assert!(matches!(ts.payload, EbmlPayload::UnsignedInt(42)));
+    }
+
+    /// A Void with a normal, known size still skips exactly that many bytes.
+    #[test]
+    fn known_size_void_skips_payload() {
+        // 0xEC 0x82 0x00 0x00      -> Void, size = 2, 2 bytes of padding
+        // 0xE7 0x81 0x2A           -> Timestamp = 42
+        let data = vec![0xEC, 0x82, 0x00, 0x00, 0xE7, 0x81, 0x2A];
+        let mut it = EbmlIterator::new_endless(0, ebml(data));
+
+        let void = pollster::block_on(it.next()).expect("void element");
+        assert_eq!(void.id, ID_VOID);
+        assert_eq!(void.size, 4); // 2-byte header + 2-byte payload
+
+        let ts = pollster::block_on(it.next()).expect("timestamp element");
+        assert!(matches!(ts.payload, EbmlPayload::UnsignedInt(42)));
+    }
+
+    /// The "unknown size" sentinel must be recognised across VINT widths, not
+    /// just the 1-octet 0xFF case.
+    #[test]
+    fn unknown_size_detected_for_multi_octet_vints() {
+        // 1-octet: 0xFF
+        let (len, size) = pollster::block_on(ebml(vec![0xFF]).read_variable_size_data_size(0));
+        assert_eq!((len, size), (1, None));
+
+        // 2-octet: 0x7F 0xFF
+        let (len, size) =
+            pollster::block_on(ebml(vec![0x7F, 0xFF]).read_variable_size_data_size(0));
+        assert_eq!((len, size), (2, None));
+
+        // 2-octet, NOT all ones -> a real value (0x3FFE = 16382)
+        let (len, size) =
+            pollster::block_on(ebml(vec![0x7F, 0xFE]).read_variable_size_data_size(0));
+        assert_eq!((len, size), (2, Some(16382)));
+    }
 }

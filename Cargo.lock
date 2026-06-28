@@ -45,6 +45,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "lru",
+ "pollster",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
