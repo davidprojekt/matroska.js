@@ -15,7 +15,7 @@ const status = (msg) => {
 };
 
 const player = createPlayer(document.querySelector('.stage'), {
-  controls: 'full',
+  controls: { preset: 'full', dock: 'below' },
   transcode: 'auto',
   // Load the ffmpeg.wasm core from the jsDelivr CDN rather than a same-origin copy. jsDelivr
   // sends permissive CORS, which the library's toBlobURL fetch requires for a cross-origin
