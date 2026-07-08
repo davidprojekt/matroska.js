@@ -10,6 +10,7 @@
 
 pub mod fmp4;
 pub mod remux;
+pub mod mkv_write;
 pub mod index;
 pub mod track;
 pub mod stream_source;

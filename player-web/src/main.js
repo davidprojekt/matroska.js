@@ -66,7 +66,11 @@ const status = (msg) => {
 
 let wasmReady = false;
 let controller = null;
+let transcoder = null; // ffmpeg.wasm AudioTranscoder for the current file, or null
 let subtitleObjectUrls = [];
+
+// MSE mime of the transcoder's output (AAC-in-MP4). Kept in sync with audioTranscoder.js.
+const TRANSCODE_OUT_MIME = 'audio/mp4; codecs="mp4a.40.2"';
 
 fileInput.addEventListener('change', (e) => {
   if (e.target.files && e.target.files[0]) {
@@ -140,6 +144,10 @@ async function load(url, { skipPreflight = false } = {}) {
     assSubs.destroy();
     assSubs = null;
   }
+  if (transcoder) {
+    transcoder.destroy();
+    transcoder = null;
+  }
   for (const t of [...video.querySelectorAll('track')]) t.remove();
   audioMenu.setItems([]);
   audioMenu.setAvailable(false);
@@ -159,24 +167,47 @@ async function load(url, { skipPreflight = false } = {}) {
   const durationMs = Number(player.duration_ms());
   const cueTimes = JSON.parse(player.cue_times()).map(Number);
 
-  const supported = (t) => t.mime && MediaSource.isTypeSupported(t.mime);
+  const nativelySupported = (t) => t.mime && MediaSource.isTypeSupported(t.mime);
   const videoTracks = tracks.filter((t) => t.type === 'video');
   const audioTracks = tracks.filter((t) => t.type === 'audio');
   const subtitleTracks = tracks.filter((t) => t.type === 'subtitle');
 
   reportTracks(tracks);
 
-  const videoTrack = videoTracks.find(supported) || null;
-  const defaultAudio = audioTracks.find((t) => t.default && supported(t)) || audioTracks.find(supported) || null;
+  // Audio whose codec the browser can't decode natively can be transcoded in-browser with
+  // ffmpeg.wasm (gated on the __TRANSCODE__ build flag and Opus-in-MP4 being playable).
+  const canTranscode = __TRANSCODE__ && MediaSource.isTypeSupported(TRANSCODE_OUT_MIME);
+  const audioPlayable = (t) => nativelySupported(t) || canTranscode;
+
+  // Spin up the transcoder (lazily — it only downloads the ffmpeg core on first use) when
+  // some audio track needs it. Confined to a dynamic import so a `TRANSCODE=off` build
+  // tree-shakes @ffmpeg/* away entirely.
+  if (canTranscode && audioTracks.some((t) => !nativelySupported(t))) {
+    const { AudioTranscoder } = await import('./audioTranscoder.js');
+    transcoder = new AudioTranscoder();
+  }
+
+  const videoTrack = videoTracks.find(nativelySupported) || null;
+  // Prefer a natively-playable audio track (default first) so we only transcode when there's
+  // no native option; otherwise fall back to the default/first track via transcoding.
+  const defaultAudio =
+    audioTracks.find((t) => t.default && nativelySupported(t)) ||
+    audioTracks.find(nativelySupported) ||
+    (canTranscode ? audioTracks.find((t) => t.default) || audioTracks[0] || null : null) ||
+    null;
 
   // Audio track menu (v10 has no audio-track feature, so this is custom).
   audioMenu.setItems(
-    audioTracks.map((t) => ({
-      value: String(t.number),
-      label: `${t.language || '??'} — ${t.name || t.codec_id}${supported(t) ? '' : ' [unsupported]'}`,
-      disabled: !supported(t),
-      selected: t === defaultAudio,
-    }))
+    audioTracks.map((t) => {
+      const native = nativelySupported(t);
+      const tag = native ? '' : canTranscode ? ' [transcoded]' : ' [unsupported]';
+      return {
+        value: String(t.number),
+        label: `${t.language || '??'} — ${t.name || t.codec_id}${tag}`,
+        disabled: !audioPlayable(t),
+        selected: t === defaultAudio,
+      };
+    })
   );
   audioMenu.setAvailable(audioTracks.length > 0);
 
@@ -201,7 +232,10 @@ async function load(url, { skipPreflight = false } = {}) {
   subsMenu.setItems(subItems);
   subsMenu.setAvailable(subtitleTracks.length > 0);
 
-  controller = new MseController(player, video, tracks, durationMs, cueTimes);
+  controller = new MseController(player, video, tracks, durationMs, cueTimes, transcoder);
+  if (defaultAudio && !nativelySupported(defaultAudio) && canTranscode) {
+    status('Preparing audio transcoder… (first load downloads the decoder)');
+  }
   await controller.start(videoTrack, defaultAudio);
 
   // Fonts download out-of-band (separate connections) so they don't disturb the single
