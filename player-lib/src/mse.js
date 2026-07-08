@@ -16,9 +16,10 @@ const GAP_TOLERANCE_MS = 500;
 const MAX_PENDING = 4;
 
 // --- DEBUG instrumentation -------------------------------------------------
-// Opt-in: set `window.MSE_DEBUG = true` in the console to log buffer/feed state
-// and enable the stall watchdog; `window.__mse.debugReport()` dumps a snapshot.
-const DEBUG = () => typeof window !== 'undefined' && window.MSE_DEBUG === true;
+// Toggle at runtime in the console: `window.MSE_DEBUG = true` (or `false`).
+// Defaults to on so the buffering bug can be observed without a rebuild.
+const DEBUG = () =>
+  typeof window === 'undefined' ? false : window.MSE_DEBUG !== false;
 const dlog = (...a) => {
   if (DEBUG()) console.log('[mse]', ...a);
 };

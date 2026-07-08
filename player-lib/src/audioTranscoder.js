@@ -16,10 +16,10 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL } from '@ffmpeg/util';
 
-// The core is served same-origin from public/ffmpeg/ (see scripts/setup-ffmpeg-core.mjs).
-const base = import.meta.env.BASE_URL || '/';
-const CORE_URL = `${base}ffmpeg/ffmpeg-core.js`;
-const WASM_URL = `${base}ffmpeg/ffmpeg-core.wasm`;
+// The ffmpeg core (glue JS + wasm) is loaded from URLs the caller supplies — see
+// `createPlayer`'s `ffmpeg.coreURL`/`ffmpeg.wasmURL` options. Any origin works as long as
+// it sends permissive CORS (toBlobURL fetches both). The apps default these to their own
+// same-origin public/ffmpeg/ (populated by scripts/setup-ffmpeg-core.mjs).
 
 // empty_moov + default_base_moof make each fragment self-contained (carries its own init),
 // so windows can be appended independently; the input chunk is zero-anchored, so output
@@ -43,7 +43,12 @@ export const TRANSCODE_MIME = 'audio/mp4; codecs="mp4a.40.2"';
 const RECREATE_EVERY = 40;
 
 export class AudioTranscoder {
-  constructor({ onLog } = {}) {
+  constructor({ coreURL, wasmURL, onLog } = {}) {
+    if (!coreURL || !wasmURL) {
+      throw new Error('AudioTranscoder requires ffmpeg coreURL and wasmURL');
+    }
+    this.coreURL = coreURL;
+    this.wasmURL = wasmURL;
     this.ffmpeg = null;
     this.loadPromise = null;
     this.tail = Promise.resolve(); // serializes exec()s — one per instance at a time
@@ -65,8 +70,8 @@ export class AudioTranscoder {
         const ff = new FFmpeg();
         if (this.onLog) ff.on('log', ({ message }) => this.onLog(message));
         await ff.load({
-          coreURL: await toBlobURL(CORE_URL, 'text/javascript'),
-          wasmURL: await toBlobURL(WASM_URL, 'application/wasm'),
+          coreURL: await toBlobURL(this.coreURL, 'text/javascript'),
+          wasmURL: await toBlobURL(this.wasmURL, 'application/wasm'),
         });
         this.ffmpeg = ff;
         this.loadPromise = null;

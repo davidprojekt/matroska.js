@@ -3,26 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser MKV player: WASM MKV→fMP4 remux + MSE + video.js v10",
+  "description": "Browser MKV player demo built on mkv-player-ui: URL box, file picker, shareable links.",
   "scripts": {
-    "copy-sw": "node -e \"require('fs').copyFileSync('node_modules/webtorrent/dist/sw.min.js','public/sw.min.js')\"",
-    "setup-ffmpeg": "node scripts/setup-ffmpeg-core.mjs",
-    "predev": "npm run copy-sw && npm run setup-ffmpeg",
-    "prebuild": "npm run copy-sw && npm run setup-ffmpeg",
     "dev": "vite",
     "build": "bash -c 'cd ../mkv-player && npm run build' && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@videojs/html": "^10.0.0-beta.24",
-    "mkv-player": "file:../mkv-player/pkg",
-    "jassub": "^2.5.6",
-    "webtorrent": "^3.0.16"
-  },
-  "optionalDependencies": {
-    "@ffmpeg/ffmpeg": "^0.12.10",
-    "@ffmpeg/util": "^0.12.1",
-    "@ffmpeg/core": "^0.12.10"
+    "mkv-player-ui": "file:../player-lib",
+    "jassub": "^2.5.6"
   },
   "devDependencies": {
     "vite": "^6.0.0"

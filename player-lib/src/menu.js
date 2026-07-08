@@ -15,19 +15,30 @@ export class TrackMenu {
     this.onSelect = onSelect;
     this.value = null;
 
-    trigger.addEventListener('click', () => this.toggle());
+    this._onTriggerClick = () => this.toggle();
+    trigger.addEventListener('click', this._onTriggerClick);
     // Close on outside click / Escape. We do NOT stopPropagation on the trigger, so a
     // click on one trigger bubbles to the document and closes any other open menu —
     // letting only one menu be open at a time. The clicked trigger's own listener sees
-    // `target === this.trigger` and leaves itself alone.
-    document.addEventListener('click', (e) => {
+    // `target === this.trigger` and leaves itself alone. The document listeners are kept
+    // on `this` so destroy() can detach them (a player can be torn down and rebuilt).
+    this._onDocClick = (e) => {
       if (this.isOpen() && !this.popup.contains(e.target) && e.target !== this.trigger) {
         this.close();
       }
-    });
-    document.addEventListener('keydown', (e) => {
+    };
+    this._onDocKeydown = (e) => {
       if (e.key === 'Escape' && this.isOpen()) this.close();
-    });
+    };
+    document.addEventListener('click', this._onDocClick);
+    document.addEventListener('keydown', this._onDocKeydown);
+  }
+
+  /** Detach the document-level listeners. Call when tearing the player down. */
+  destroy() {
+    this.trigger.removeEventListener('click', this._onTriggerClick);
+    document.removeEventListener('click', this._onDocClick);
+    document.removeEventListener('keydown', this._onDocKeydown);
   }
 
   isOpen() {

@@ -32,8 +32,9 @@ This is a Cargo workspace + a small web frontend:
 | `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. (MIT) |
 | `ebml-wasm`   | The **EBML/Matroska parser core**: a forward-only **async iterator** over `EbmlElement`s plus the byte sources (`FetchSource`, `FsSource`, `MemSource`), exposed to JS via `wasm-bindgen` (`EbmlReader`, `FetchSourceEbml`). Container parsing only — no remuxing. (MIT) |
 | `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `cue_offset()`, `subtitles()`, and `cue_times()`. The fMP4 box writer lives in `fmp4.rs`, block/sample extraction in `remux.rs`, the seek index in `index.rs`, track/codec mapping in `track.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
-| `player-web`  | The **MKV player demo**: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) for the UI, driving MSE from the `mkv-player` WASM remuxer, with a custom audio-track selector and ASS/SSA subtitle rendering via libass (JASSUB). File picker, URL box, and WebTorrent streaming. (AGPL-3.0) |
-| `player-embed`| A **headless embeddable** build of the player: no chrome, just the video filling the frame. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. Shares the `mkv-player` core with `player-web` (sans WebTorrent). (AGPL-3.0) |
+| `player-lib`  | **`mkv-player-ui`** — the **reusable player library** both frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), and in-browser audio transcoding via ffmpeg.wasm. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable) and loads the ffmpeg core from a caller-supplied URL. (AGPL-3.0) |
+| `player-web`  | The **MKV player demo**: a URL box, local-file picker, and copy-shareable-link button around `mkv-player-ui`. (AGPL-3.0) |
+| `player-embed`| A **headless embeddable** build: no chrome, just the video filling the frame, wrapping `mkv-player-ui` with `controls: 'full'`. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. (AGPL-3.0) |
 | `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. |
 
 ## Supported codecs
@@ -80,12 +81,16 @@ wasm-pack build --target web
 cd ../ebml-wasm
 npm start            # simple-http-server -i --cors --port 8501
 
-# 3. In another shell, run the player dev server.
+# 3. In another shell, install the shared player library, then run the dev server.
+cd ../player-lib
+npm install          # installs the library's deps (video.js, jassub, ffmpeg.wasm)
 cd ../player-web
 npm install
 npm run dev          # open the printed Vite URL
 ```
 
+> Both frontends consume the shared **`mkv-player-ui`** library in `player-lib/` (a
+> workspace `file:` dependency), so run `npm install` in `player-lib` before the apps.
 > `npm run build` in `player-web` / `player-embed` runs the `mkv-player` wasm build
 > for you, so step 1 is only needed for the dev server.
 
@@ -147,8 +152,9 @@ This repository is split by component:
 - **`ebml-spec` and `ebml-wasm`** — the EBML/Matroska **parser core** — are licensed
   under the **MIT License** (see [`ebml-wasm/LICENSE`](ebml-wasm/LICENSE)). Use them
   freely, including in closed-source projects.
-- **`mkv-player`** (the MKV→fMP4 remuxer/player) and the **player frontends**
-  (`player-web`, `player-embed`) are licensed under the **GNU Affero General Public
-  License v3.0** (AGPL-3.0) — see [`LICENSE.txt`](LICENSE.txt). You're free to use,
+- **`mkv-player`** (the MKV→fMP4 remuxer/player), the **`mkv-player-ui`** library
+  (`player-lib`), and the **player frontends** (`player-web`, `player-embed`) are licensed
+  under the **GNU Affero General Public License v3.0** (AGPL-3.0) — see
+  [`LICENSE.txt`](LICENSE.txt). You're free to use,
   study, modify, and share them, but if you distribute them **or run a modified
   version as a network service**, you must release your source under the same license.
