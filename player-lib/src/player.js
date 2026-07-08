@@ -65,6 +65,11 @@ export class MkvPlayer {
     const t = opts.transcode ?? 'auto';
     this._wantTranscode = t === 'auto' ? buildFlag : !!t;
 
+    // Default title shown in the title bar for every load, unless a per-load `title` overrides
+    // it. When neither is given the library falls back to the MKV segment title, then the URL
+    // filename (see _load).
+    this._title = opts.title ?? null;
+
     // --- build the control bar and capture element references ---
     const refs = buildControlBar(container, opts.controls);
     this.refs = refs;
@@ -129,6 +134,28 @@ export class MkvPlayer {
     this._emit('status', msg, { level });
   }
 
+  // Filename component of a URL, for use as a fallback title. Returns null for blob:/data:
+  // URLs (object URLs carry no meaningful name) or anything unparseable.
+  _basenameFromUrl(url) {
+    try {
+      const u = new URL(url, window.location.href);
+      if (u.protocol === 'blob:' || u.protocol === 'data:') return null;
+      const base = decodeURIComponent((u.pathname.split('/').pop() || '').trim());
+      return base || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Write the title bar text and hide the bar entirely when there's nothing to show.
+  _setTitle(title) {
+    const el = this.refs.titleBar;
+    if (!el) return;
+    const text = title || '';
+    el.textContent = text;
+    el.hidden = !text;
+  }
+
   async _preflight(url) {
     // The remuxer relies on HTTP byte ranges (206) and, cross-origin, on CORS. Probe up
     // front so a server that lacks them produces a clear message, not silent empty.
@@ -148,9 +175,9 @@ export class MkvPlayer {
     }
   }
 
-  async load(url, { skipPreflight = false } = {}) {
+  async load(url, { skipPreflight = false, title } = {}) {
     try {
-      await this._load(url, { skipPreflight });
+      await this._load(url, { skipPreflight, title });
     } catch (e) {
       console.error(e);
       this._emit('error', e);
@@ -158,7 +185,7 @@ export class MkvPlayer {
     }
   }
 
-  async _load(url, { skipPreflight }) {
+  async _load(url, { skipPreflight, title }) {
     if (this.destroyed) throw new Error('player destroyed');
     this._status(`Opening ${url} …`, 'loading');
     await ensureWasm();
@@ -169,6 +196,10 @@ export class MkvPlayer {
 
     const player = await MatroskaPlayer.open(url);
     this.activePlayer = player;
+
+    // Title precedence: explicit per-load title → constructor default → MKV segment title →
+    // URL filename. `player.title()` returns undefined when the file carries no Info\Title.
+    this._setTitle(title ?? this._title ?? player.title() ?? this._basenameFromUrl(url));
     this.assSubs = new AssSubtitleController(this.video);
     const tracks = JSON.parse(player.tracks());
     this.trackList = tracks;
@@ -549,6 +580,7 @@ export class MkvPlayer {
     }
     this.chapterList = [];
     if (this.refs.chapterMarkers) this.refs.chapterMarkers.textContent = '';
+    this._setTitle('');
   }
 
   destroy() {

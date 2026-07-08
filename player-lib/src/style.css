@@ -40,6 +40,31 @@ media-icon > svg { width: 100%; height: 100%; }
 .vjs-chapter-markers { position: absolute; inset-inline: 0; top: 50%; height: 0.7rem; transform: translateY(-50%); pointer-events: none; z-index: 5; }
 .vjs-chapter-marker { position: absolute; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); background: color-mix(in srgb, currentColor 55%, transparent); border-radius: 1px; }
 
+/* Title bar across the top of the player. Populated by the library from the MKV segment
+   title (or a caller-supplied title / the URL filename). Its visibility mirrors the control
+   bar's: it fades in/out together with the controls by keying off the skin's own
+   `.media-controls[data-visible]` state, so no extra JS is needed. */
+.mkv-title-bar {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 10;
+  padding: 0.75rem 1rem;
+  color: var(--media-color-primary, oklch(1 0 0));
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity var(--media-controls-transition-duration, 200ms)
+    var(--media-controls-transition-timing-function, ease-out);
+}
+.mkv-title-bar[hidden] { display: none; }
+.media-default-skin--video:has(.media-controls[data-visible]) .mkv-title-bar { opacity: 1; }
+
 /* Custom Audio/Subtitle/Chapter dropdown menus in the control bar. */
 .vjs-menu { position: relative; display: inline-flex; align-items: center; }
 .vjs-menu__trigger { font-size: 0.8125rem; padding: 0 0.6rem; min-width: auto; }

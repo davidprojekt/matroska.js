@@ -15,7 +15,7 @@ use ebml_wasm::matroska_data::{
     ID_CHAPTERS, ID_CHAPTERTIMEEND, ID_CHAPTERTIMESTART, ID_CHAPTERUID, ID_CLUSTER, ID_CUES,
     ID_DURATION, ID_EDITIONENTRY, ID_EDITIONFLAGDEFAULT, ID_EDITIONFLAGHIDDEN, ID_FILEDATA,
     ID_FILEMEDIATYPE, ID_FILENAME, ID_FILEUID, ID_INFO, ID_REFERENCEBLOCK, ID_SEEKHEAD, ID_SEGMENT,
-    ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE, ID_TRACKS,
+    ID_SIMPLEBLOCK, ID_TIMESTAMP, ID_TIMESTAMPSCALE, ID_TITLE, ID_TRACKS,
 };
 use crate::remux::{
     audio_samples, cues_to_webvtt, parse_block, video_samples, BlockFrames, SubtitleCue, TimedFrame,
@@ -96,6 +96,8 @@ where
     timestamp_scale_ns: u64,
     /// Total duration in TimestampScale ticks (from Info\Duration).
     duration_ticks: f64,
+    /// Human-readable segment title (from Info\Title), if present.
+    title: Option<String>,
     tracks: Vec<TrackData>,
     cues: Vec<CuePoint>,
     first_cluster_offset: Option<u64>,
@@ -114,6 +116,7 @@ where
             segment_end: u64::MAX,
             timestamp_scale_ns: DEFAULT_TIMESTAMP_SCALE_NS,
             duration_ticks: 0.0,
+            title: None,
             tracks: Vec::new(),
             cues: Vec::new(),
             first_cluster_offset: None,
@@ -287,6 +290,7 @@ where
                     self.timestamp_scale_ns = v;
                 }
                 EbmlPayload::Float(v) if field.id == ID_DURATION => self.duration_ticks = v,
+                EbmlPayload::String(s) if field.id == ID_TITLE => self.title = Some(s),
                 _ => {}
             }
         }
@@ -687,6 +691,11 @@ where
 
     pub fn timestamp_scale(&self) -> u64 {
         self.timestamp_scale_ns
+    }
+
+    /// The Matroska Segment title (`Info\Title`), or `None` if the file has none.
+    pub fn title(&self) -> Option<String> {
+        self.title.clone()
     }
 
     /// JSON description of all tracks for the JS side.
@@ -1150,6 +1159,11 @@ mod wasm {
 
         pub fn timestamp_scale(&self) -> u64 {
             self.0.timestamp_scale()
+        }
+
+        /// The Matroska Segment title (`Info\Title`), or `None`.
+        pub fn title(&self) -> Option<String> {
+            self.0.title()
         }
 
         /// JSON array of cue times in ms (segment boundaries), e.g. `[0,2000,...]`.

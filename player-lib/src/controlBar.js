@@ -153,7 +153,7 @@ const gesturesFrag = () => `
 
 /**
  * Build the player DOM into `container`, keeping only the controls in `controlsConfig`.
- * Returns `{ video, audioTrigger, audioMenu, subsTrigger, subsMenu, chaptersTrigger,
+ * Returns `{ video, titleBar, audioTrigger, audioMenu, subsTrigger, subsMenu, chaptersTrigger,
  * chaptersMenu, prevChapter, nextChapter, chapterMarkers }`; entries for disabled controls
  * are `null`. The `<video>` always stays nested in `<media-container>` so the JASSUB
  * subtitle overlay (inserted after the video) positions correctly even with no controls.
@@ -184,8 +184,13 @@ export function buildControlBar(container, controlsConfig) {
     flags.play || flags.seek || flags.chapterSkip || flags.timeSlider ||
     flags.chapters || flags.audio || flags.subtitles || flags.volume || flags.fullscreen;
 
+  // `data-interactive` marks the whole control bar as an interactive surface so the tap
+  // gesture (togglePaused, region "center" = full surface) never fires when the user clicks
+  // control-bar chrome. Native buttons and the ARIA-role'd menu already match the gesture's
+  // interactive selector, but the bar's non-button parts (time readout, gaps, group wrappers)
+  // and our custom menu popups did not — so clicks there "fell through" and toggled playback.
   const controlsMarkup = hasControls
-    ? `<media-controls class="media-surface media-controls">
+    ? `<media-controls data-interactive class="media-surface media-controls">
         <media-tooltip-group>
           ${group1 ? `<div class="media-button-group">${group1}</div>` : ''}
           ${flags.timeSlider ? timeSliderFrag(flags) : ''}
@@ -194,10 +199,18 @@ export function buildControlBar(container, controlsConfig) {
       </media-controls>`
     : '';
 
+  // A title bar across the top of the player. Populated by the player orchestrator and shown
+  // only when there are controls — its visibility mirrors the control bar's (see style.css).
+  const titleBarMarkup = hasControls
+    ? `<div class="mkv-title-bar" data-ref="titleBar" hidden></div>`
+    : '';
+
   container.innerHTML = `
     <video-player>
       <media-container class="media-default-skin media-default-skin--video">
         <video data-ref="video" playsinline crossorigin="anonymous"></video>
+
+        ${titleBarMarkup}
 
         <media-buffering-indicator class="media-buffering-indicator">
           <div class="media-surface">
@@ -217,6 +230,7 @@ export function buildControlBar(container, controlsConfig) {
   const q = (ref) => container.querySelector(`[data-ref="${ref}"]`);
   return {
     video: q('video'),
+    titleBar: q('titleBar'),
     audioTrigger: q('audioTrigger'),
     audioMenu: q('audioMenu'),
     subsTrigger: q('subsTrigger'),

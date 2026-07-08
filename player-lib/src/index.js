@@ -6,6 +6,8 @@
 //   const player = createPlayer(document.querySelector('#player'), {
 //     controls: 'full',                 // 'full' | 'minimal' | 'none' | { preset, ...perControlBooleans }
 //     transcode: 'auto',                // 'auto' | true | false
+//     title: 'My video',                // default title bar text; per-load override via load(url, { title })
+//                                        // falls back to the MKV segment title, then the URL filename
 //     ffmpeg: { coreURL, wasmURL },     // where to load the ffmpeg.wasm core from (any CORS-enabled origin)
 //     onStatus(msg, { level }) {},      // level: 'loading' | 'info'
 //     onError(err) {},

@@ -29,9 +29,15 @@ const player = createPlayer(document.querySelector('.stage'), {
 });
 
 // Local file → object URL so the WASM remuxer can Range-request it like any other source.
+// Remember the file's name: a blob: object URL carries no filename for the library to fall
+// back to, so we pass it explicitly as the title.
+let pickedFileName = null;
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files && e.target.files[0];
-  if (file) urlInput.value = URL.createObjectURL(file);
+  if (file) {
+    urlInput.value = URL.createObjectURL(file);
+    pickedFileName = file.name;
+  }
 });
 
 // Copy a shareable link: the current URL Base64-encoded into the page's #hash.
@@ -52,7 +58,11 @@ if (hash) {
 }
 
 const load = (url) =>
-  player.load(url).catch(() => {}); // onError already renders the message
+  // Local files load from a blob: URL with no derivable filename, so show the picked name.
+  // For http URLs we pass nothing and let the library use the MKV segment title / filename.
+  player
+    .load(url, { title: url.startsWith('blob:') ? pickedFileName : undefined })
+    .catch(() => {}); // onError already renders the message
 
 loadBtn.addEventListener('click', () => {
   const url = urlInput.value.trim();
