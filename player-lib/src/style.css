@@ -6,8 +6,25 @@
  * status overlays) is left to the embedding page. */
 
 /* libass (JASSUB) overlay — created at runtime, sized/positioned by JASSUB over the video;
-   pointer-events:none lets clicks through to the player controls. */
+   pointer-events:none lets clicks through to the player controls. ASS subtitles carry their own
+   author-authored position in the video frame, so we deliberately do NOT move the overlay with
+   the controls; instead the control bar hugs the bottom edge (below) to minimise the band it
+   shares with low-anchored subtitles. */
 .jassub-overlay { position: absolute; pointer-events: none; }
+
+/* Soften the skin's control scrim. The skin runs `.media-overlay`'s gradient all the way to the
+   top, tinting the whole frame when controls are visible; the frosted control bar is legible
+   with far less, so keep only a short wash near the bottom and leave the picture's center clear.
+   Two skin classes on media-container (0,3,0) beat the skin's own `.media-default-skin
+   .media-overlay` (0,2,0) regardless of stylesheet order. */
+.media-default-skin.media-default-skin--video .media-overlay {
+  background-image: linear-gradient(
+    to top,
+    oklch(0 0 0 / 0.45),
+    oklch(0 0 0 / 0.1) 20%,
+    oklch(0 0 0 / 0) 38%
+  );
+}
 
 /* The skin's icon CSS targets inline <svg class="media-icon">, but our ejected markup uses
    the <media-icon> wrapper element (renders the svg via innerHTML, defaults to
@@ -32,6 +49,17 @@ media-icon > svg { width: 100%; height: 100%; }
   left: 50%;
 }
 
+/* Control-bar placement. The skin's default floating pill (inset 0.5–0.75rem, 1.5rem radius) is
+   kept as-is for fullscreen. In the windowed player the bar runs flush to the player edges — no
+   side/bottom gap, square. The container's `overflow:clip` (skin) clips the strip to the player's
+   rounded bottom corners. Two skin classes on media-container (0,3,0) beat the skin's own
+   `.media-default-skin--video .media-controls` (0,2,0) at both breakpoints. */
+.media-default-skin.media-default-skin--video:not(:fullscreen) .media-controls {
+  inset-inline: 0;
+  bottom: 0;
+  border-radius: 0;
+}
+
 /* Previous/next-chapter skip buttons. */
 .vjs-chapter-skip { font-size: 1rem; line-height: 1; padding: 0 0.45rem; }
 
@@ -49,11 +77,11 @@ media-icon > svg { width: 100%; height: 100%; }
   inset-inline: 0;
   top: 0;
   z-index: 10;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 1rem 1.1rem;
   color: var(--media-color-primary, oklch(1 0 0));
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.4), transparent);
   pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
