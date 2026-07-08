@@ -4,9 +4,19 @@
 // from the track's CodecPrivate, and the dialogue events are streamed in window-by-
 // window by the MseController as it buffers clusters (see SubtitleFeeder in mse.js).
 // Each ASS line carries its own absolute Start/End, so feed order is irrelevant — we
-// just accumulate the events seen so far (deduped by their MKV ReadOrder) and hand the
-// growing document to libass via setTrack, debounced. libass resolves styles by name,
-// which is why we feed text rather than libass's index-based createEvent.
+// just accumulate the events seen so far (deduped by their MKV ReadOrder). libass
+// resolves styles by name, which is why we feed text rather than libass's index-based
+// createEvent.
+//
+// Two responsibilities are split apart so multiple tracks can be shown at once:
+//   • SubtitleTrack   — the growing cue cache for ONE track. Fed continuously for every
+//                       ASS track from playback start (whether or not it's displayed), so
+//                       enabling a track is instant and never drops the line already on
+//                       screen. No JASSUB — just accumulated `Dialogue:` lines + header.
+//   • SubtitleRenderer — one JASSUB instance + canvas overlay, created only for a track
+//                        that's actually displayed (max two at a time). Seeded from the
+//                        cache's full document on show, then updated (debounced) as more
+//                        cues arrive.
 //
 // JASSUB resolves its worker/wasm/default-font via `new URL(…, import.meta.url)`; we let
 // Vite handle that (jassub is in optimizeDeps.exclude) rather than passing workerUrl/wasmUrl.
@@ -61,38 +71,67 @@ function normalizeHeader(header) {
   return h;
 }
 
-export class AssSubtitleController {
+/**
+ * The cue cache for a single subtitle track. Fed continuously by a SubtitleFeeder
+ * (mse.js) for the whole session, independent of whether the track is displayed.
+ * Notifies `onChange` when new cues land so an attached SubtitleRenderer can re-render.
+ */
+export class SubtitleTrack {
+  /** @param header the track's CodecPrivate (ASS script header). */
+  constructor(header) {
+    this.header = normalizeHeader(header);
+    this.events = new Map(); // ReadOrder → Dialogue line
+    this.onChange = null; // set by the manager while this track is displayed
+  }
+
+  /** Merge a batch of `{start, end, text}` cues (from subtitle_events). */
+  addEvents(cues) {
+    if (!Array.isArray(cues) || cues.length === 0) return;
+    let added = 0;
+    for (const c of cues) {
+      const key = readOrderOf(c.text);
+      if (this.events.has(key)) continue;
+      const line = toDialogue(c.start, c.end, c.text);
+      if (!line) continue;
+      this.events.set(key, line);
+      added++;
+    }
+    if (added && this.onChange) this.onChange();
+  }
+
+  /** The full ASS document (header + every accumulated event). */
+  buildDoc() {
+    return this.header + [...this.events.values()].join('\n') + '\n';
+  }
+}
+
+/**
+ * One JASSUB instance rendering one displayed subtitle track over its own canvas overlay.
+ * Created only when a track is shown; several can coexist (dual subtitles), each with its
+ * own canvas and worker. All render at the track's native ASS position.
+ */
+export class SubtitleRenderer {
   /**
    * @param video HTMLVideoElement (drives timing/resize via requestVideoFrameCallback)
+   * @param fonts Uint8Array[] font attachments to seed the instance with
    *
    * We create a fresh canvas (JASSUB transfers it to an OffscreenCanvas, so it can't be
    * reused on reload) and mount it right after the <video> inside media-container. DOM
    * order puts it above the video but below media-controls (which comes later in the
    * markup), so the overlay sits under the control bar. JASSUB sizes/positions it to
-   * match the video (they share media-container as their containing block).
+   * match the video (they share media-container as their containing block). Multiple
+   * overlays are transparent and stack cleanly.
    */
-  constructor(video) {
+  constructor(video, fonts = []) {
     this.video = video;
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'jassub-overlay'; // JASSUB sets size/position; CSS sets the rest
     this.canvas.style.display = 'none';
     video.insertAdjacentElement('afterend', this.canvas);
     this.instance = null;
-    this.fonts = []; // Uint8Array[] gathered from attachments
-    this.header = DEFAULT_HEADER;
-    this.events = new Map(); // ReadOrder → Dialogue line
-    this.enabled = false;
+    this.fonts = fonts.slice(); // Uint8Array[] gathered from attachments
+    this.doc = null; // most recent document handed to buildDoc/show/update
     this.rebuildTimer = null;
-  }
-
-  /** Add a font (Uint8Array) from an attachment. Works before or after the instance exists. */
-  addFontData(data) {
-    this.fonts.push(data); // also picked up by the `fonts` option if the instance is created later
-    if (this.instance) {
-      this._withRenderer((r) => r.addFonts([data])).then(() => {
-        if (this.enabled) this.scheduleRebuild(); // re-resolve glyphs against the new font
-      });
-    }
   }
 
   ensureInstance() {
@@ -100,7 +139,7 @@ export class AssSubtitleController {
     this.instance = new JASSUB({
       video: this.video,
       canvas: this.canvas,
-      subContent: this.header,
+      subContent: this.doc || '',
       fonts: this.fonts.slice(),
     });
   }
@@ -124,55 +163,32 @@ export class AssSubtitleController {
     }
   }
 
-  /** Turn on rendering for a track whose ASS header is `header` (its CodecPrivate). */
-  async enableTrack(header) {
-    this.header = normalizeHeader(header);
-    this.events.clear();
-    this.enabled = true;
+  /** Start rendering `doc` (a full ASS document) immediately. */
+  async show(doc) {
+    this.doc = doc;
     this.ensureInstance();
     if (this.canvas) this.canvas.style.display = '';
-    await this._withRenderer((r) => {
-      if (this.enabled) r.setTrack(this.buildDoc());
-    });
+    await this._withRenderer((r) => r.setTrack(this.doc));
   }
 
-  /** Merge a batch of `{start, end, text}` cues (from subtitle_events). */
-  addEvents(cues) {
-    if (!this.enabled || !Array.isArray(cues) || cues.length === 0) return;
-    let added = 0;
-    for (const c of cues) {
-      const key = readOrderOf(c.text);
-      if (this.events.has(key)) continue;
-      const line = toDialogue(c.start, c.end, c.text);
-      if (!line) continue;
-      this.events.set(key, line);
-      added++;
-    }
-    if (added) this.scheduleRebuild();
-  }
-
-  buildDoc() {
-    return this.header + [...this.events.values()].join('\n') + '\n';
-  }
-
-  scheduleRebuild() {
+  /** Re-render with a fresh `doc`, debounced (cues trickle in as playback streams). */
+  update(doc) {
+    this.doc = doc;
     if (this.rebuildTimer || !this.instance) return;
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
-      if (this.enabled) this._withRenderer((r) => r.setTrack(this.buildDoc()));
+      this._withRenderer((r) => r.setTrack(this.doc));
     }, REBUILD_DEBOUNCE_MS);
   }
 
-  /** Stop rendering but keep fonts/instance for a quick re-enable. */
-  disable() {
-    this.enabled = false;
-    this.events.clear();
-    if (this.rebuildTimer) {
-      clearTimeout(this.rebuildTimer);
-      this.rebuildTimer = null;
+  /** Add a font (Uint8Array) from an attachment. Works before or after the instance exists. */
+  addFont(data) {
+    this.fonts.push(data); // also picked up by the `fonts` option if the instance is created later
+    if (this.instance) {
+      this._withRenderer((r) => r.addFonts([data])).then(() => {
+        if (this.doc) this.update(this.doc); // re-resolve glyphs against the new font
+      });
     }
-    this._withRenderer((r) => r.freeTrack());
-    if (this.canvas) this.canvas.style.display = 'none';
   }
 
   destroy() {
@@ -187,8 +203,7 @@ export class AssSubtitleController {
       this.canvas.remove();
     }
     this.canvas = null;
-    this.events.clear();
+    this.doc = null;
     this.fonts = [];
-    this.enabled = false;
   }
 }

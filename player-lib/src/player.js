@@ -12,7 +12,7 @@ import '@videojs/html/icons/element/default';
 
 import initWasm, { MatroskaPlayer } from 'mkv-player';
 import { MseController } from './mse.js';
-import { AssSubtitleController } from './subtitles.js';
+import { SubtitleTrack, SubtitleRenderer } from './subtitles.js';
 import { TrackMenu } from './menu.js';
 import { buildControlBar } from './controlBar.js';
 
@@ -79,8 +79,13 @@ export class MkvPlayer {
     this.audioMenu = refs.audioTrigger
       ? new TrackMenu(refs.audioTrigger, refs.audioMenu, (v) => this._onAudioSelect(Number(v)))
       : null;
+    // Subtitles allow up to two simultaneous tracks (dual subs), so this menu is
+    // multi-select; each pick reports the full set of active track numbers.
     this.subsMenu = refs.subsTrigger
-      ? new TrackMenu(refs.subsTrigger, refs.subsMenu, (v) => this._onSubSelect(v))
+      ? new TrackMenu(refs.subsTrigger, refs.subsMenu, (v) => this._onSubSelect(v), {
+          multiSelect: true,
+          maxSelect: 2,
+        })
       : null;
     this.chapterMenu = refs.chaptersTrigger
       ? new TrackMenu(refs.chaptersTrigger, refs.chaptersMenu, (v) => this._onChapterSelect(v))
@@ -88,7 +93,12 @@ export class MkvPlayer {
 
     // --- per-session state ---
     this.activePlayer = null;
-    this.assSubs = null;
+    // Subtitles: a cue cache per ASS track (fed continuously from load), plus a JASSUB
+    // renderer per *displayed* track (≤2). Fonts are shared across renderers.
+    this.subTracks = new Map(); // track number → SubtitleTrack (cue cache)
+    this.subRenderers = new Map(); // track number → SubtitleRenderer (only while displayed)
+    this.subFonts = []; // Uint8Array[] font attachments, shared by all renderers
+    this.activeSubNumbers = new Set(); // ASS track numbers currently rendered
     this.trackList = [];
     this.chapterList = [];
     this.userChoseSub = false;
@@ -200,7 +210,6 @@ export class MkvPlayer {
     // Title precedence: explicit per-load title → constructor default → MKV segment title →
     // URL filename. `player.title()` returns undefined when the file carries no Info\Title.
     this._setTitle(title ?? this._title ?? player.title() ?? this._basenameFromUrl(url));
-    this.assSubs = new AssSubtitleController(this.video);
     const tracks = JSON.parse(player.tracks());
     this.trackList = tracks;
     this.chapterList = JSON.parse(player.chapters());
@@ -258,31 +267,30 @@ export class MkvPlayer {
     this._buildChapterMenu(defaultAudio ? defaultAudio.language : null);
     this._buildChapterMarkers(durationMs);
 
-    // ASS tracks render via libass. Plain-text subs are listed but disabled (the WebVTT path
-    // is not wired into the libass overlay yet).
-    if (this.subsMenu) {
-      const subItems = [{ value: '', label: 'Off', selected: true }];
-      for (const t of subtitleTracks) {
-        this.subtitleInfo.set(t.number, { language: t.language, name: t.name });
-        const kind = subKind(t);
-        if (kind) this.subKindByNumber.set(t.number, kind);
-        const tag =
-          kind === 'ass' ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
-        subItems.push({
-          value: String(t.number),
-          label: `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`,
-          disabled: kind !== 'ass', // only ASS is wired up for now
-        });
+    // ASS tracks render via libass; a cue cache is built for each and fed continuously so
+    // any track can be shown instantly (dual subs allowed, max two). Plain-text subs are
+    // listed but disabled (the WebVTT path is not wired into the libass overlay yet).
+    const subItems = [{ value: '', label: 'Off' }];
+    for (const t of subtitleTracks) {
+      this.subtitleInfo.set(t.number, { language: t.language, name: t.name });
+      const kind = subKind(t);
+      if (kind) this.subKindByNumber.set(t.number, kind);
+      if (kind === 'ass') {
+        const header = player.subtitle_header(BigInt(t.number));
+        this.subTracks.set(t.number, new SubtitleTrack(header));
       }
+      const tag =
+        kind === 'ass' ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
+      subItems.push({
+        value: String(t.number),
+        label: `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`,
+        disabled: kind !== 'ass', // only ASS is wired up for now
+        addable: kind === 'ass', // dual-sub add button
+      });
+    }
+    if (this.subsMenu) {
       this.subsMenu.setItems(subItems);
       this.subsMenu.setAvailable(subtitleTracks.length > 0);
-    } else {
-      // Menu hidden, but forced-subtitle logic still needs the codec/kind maps.
-      for (const t of subtitleTracks) {
-        this.subtitleInfo.set(t.number, { language: t.language, name: t.name });
-        const kind = subKind(t);
-        if (kind) this.subKindByNumber.set(t.number, kind);
-      }
     }
 
     this.controller = new MseController(
@@ -297,6 +305,12 @@ export class MkvPlayer {
       this._status('Preparing audio transcoder… (first load downloads the decoder)', 'loading');
     }
     await this.controller.start(videoTrack, defaultAudio);
+
+    // Stream cues for every ASS track from the start (caches fill as playback progresses),
+    // so enabling a track later is instant and never drops the line already on screen.
+    this.controller.setSubtitleSinks(
+      [...this.subTracks.entries()].map(([trackNumber, sink]) => ({ trackNumber, sink }))
+    );
 
     // Fonts download out-of-band (separate connections) so they don't disturb the single
     // forward media stream; subtitles render once they arrive. Fire and forget.
@@ -338,45 +352,74 @@ export class MkvPlayer {
     return track;
   }
 
-  // Turn a subtitle selection on: '' = off, an ASS track = libass, a text track = WebVTT.
-  async _selectSubtitle(value) {
-    // Reset both renderers first so only the chosen track is active.
-    for (const tt of this.video.textTracks) tt.mode = 'disabled';
-    if (this.assSubs) this.assSubs.disable();
-    if (this.controller) this.controller.clearSubtitleTrack();
-    if (!value || !this.activePlayer) return;
+  // Reconcile the set of active subtitle tracks against `values` (array of track-number
+  // strings; [] = off). ASS tracks render via libass (up to two at once, each its own
+  // overlay), seeded instantly from their always-filling cue cache. A text track uses the
+  // native <track> path (single).
+  async _selectSubtitle(values) {
+    if (!this.activePlayer) return;
+    const nums = (Array.isArray(values) ? values : values ? [values] : [])
+      .map(Number)
+      .filter((n) => !Number.isNaN(n));
+    const wantAss = new Set(nums.filter((n) => this.subKindByNumber.get(n) === 'ass'));
+    const textNum = nums.find((n) => this.subKindByNumber.get(n) === 'text');
 
-    const number = Number(value);
-    const kind = this.subKindByNumber.get(number);
-    if (kind === 'ass') {
+    // ASS: drop renderers no longer wanted, add ones newly wanted (cache already primed).
+    for (const n of [...this.activeSubNumbers]) {
+      if (!wantAss.has(n)) this._disableAssRenderer(n);
+    }
+    for (const n of wantAss) {
+      if (!this.activeSubNumbers.has(n)) this._enableAssRenderer(n);
+    }
+
+    // Text (native <track>): single at a time.
+    for (const tt of this.video.textTracks) tt.mode = 'disabled';
+    if (textNum != null) await this._showTextSubtitle(textNum);
+
+    if (this.activeSubNumbers.size) {
+      this._status(`Subtitles on (${this.activeSubNumbers.size}).`);
+    }
+  }
+
+  // Create a JASSUB overlay for ASS track `number` and seed it from the cache immediately.
+  _enableAssRenderer(number) {
+    const cache = this.subTracks.get(number);
+    if (!cache || this.subRenderers.has(number)) return;
+    const renderer = new SubtitleRenderer(this.video, this.subFonts);
+    this.subRenderers.set(number, renderer);
+    this.activeSubNumbers.add(number);
+    // Push later cue batches into this renderer (debounced) while it stays displayed.
+    cache.onChange = () => renderer.update(cache.buildDoc());
+    renderer.show(cache.buildDoc()).catch((e) => console.warn('subtitle render failed', e));
+  }
+
+  _disableAssRenderer(number) {
+    const cache = this.subTracks.get(number);
+    if (cache) cache.onChange = null;
+    const renderer = this.subRenderers.get(number);
+    if (renderer) renderer.destroy();
+    this.subRenderers.delete(number);
+    this.activeSubNumbers.delete(number);
+  }
+
+  async _showTextSubtitle(number) {
+    let el = this.loadedSubs.get(number);
+    if (!el) {
+      this._status('Extracting subtitles (one-time scan)…', 'loading');
       try {
-        const header = this.activePlayer.subtitle_header(BigInt(number));
-        await this.assSubs.enableTrack(header);
-        this.controller.setSubtitleTrack(number, this.assSubs);
-        this._status('ASS subtitles on (streaming).');
+        el = await this._loadSubtitle(this.activePlayer, number);
       } catch (e) {
         console.error(e);
-        this._status('ASS subtitle error: ' + e.message);
+        this._status('Subtitle extraction failed: ' + e.message);
+        return;
       }
-    } else if (kind === 'text') {
-      let el = this.loadedSubs.get(number);
       if (!el) {
-        this._status('Extracting subtitles (one-time scan)…', 'loading');
-        try {
-          el = await this._loadSubtitle(this.activePlayer, number);
-        } catch (e) {
-          console.error(e);
-          this._status('Subtitle extraction failed: ' + e.message);
-          return;
-        }
-        if (!el) {
-          this._status('No subtitle cues found for that track.');
-          return;
-        }
-        this._status('Subtitles ready.');
+        this._status('No subtitle cues found for that track.');
+        return;
       }
-      if (el.track) el.track.mode = 'showing';
+      this._status('Subtitles ready.');
     }
+    if (el.track) el.track.mode = 'showing';
   }
 
   // Menu callbacks.
@@ -389,9 +432,9 @@ export class MkvPlayer {
     }
   }
 
-  _onSubSelect(value) {
+  _onSubSelect(values) {
     this.userChoseSub = true; // explicit choice — forced-subtitle logic must not override it
-    this._selectSubtitle(value);
+    this._selectSubtitle(values);
   }
 
   // ---- Chapters ----
@@ -494,7 +537,7 @@ export class MkvPlayer {
   // bytes to libass. baseUrl is the same URL the demuxer plays from (HTTP or a blob: URL —
   // both support Range).
   async _loadFonts(player, baseUrl) {
-    const sink = this.assSubs;
+    const fonts = this.subFonts; // identity check below: bail if a new file loaded meanwhile
     let list;
     try {
       list = JSON.parse(player.font_attachments());
@@ -509,7 +552,9 @@ export class MkvPlayer {
           const buf = new Uint8Array(await resp.arrayBuffer());
           // If the server ignored Range and returned the whole body (200), slice ourselves.
           const data = resp.status === 206 ? buf : buf.slice(Number(f.start), Number(f.end) + 1);
-          if (sink === this.assSubs) sink.addFontData(data); // ignore if a new file loaded meanwhile
+          if (fonts !== this.subFonts) return; // a new file loaded meanwhile — drop it
+          fonts.push(data); // seeds renderers created later
+          for (const r of this.subRenderers.values()) r.addFont(data); // and any showing now
         } catch (e) {
           console.warn(`font "${f.name}" fetch failed`, e);
         }
@@ -529,8 +574,8 @@ export class MkvPlayer {
         langMatch(t.language, audioLang)
     );
     if (!forced) return;
-    if (this.subsMenu) this.subsMenu.setValue(String(forced.number));
-    this._selectSubtitle(String(forced.number)); // programmatic — keep userChoseSub false
+    if (this.subsMenu) this.subsMenu.setValue([String(forced.number)]);
+    this._selectSubtitle([String(forced.number)]); // programmatic — keep userChoseSub false
   }
 
   _reportTracks(tracks) {
@@ -556,10 +601,11 @@ export class MkvPlayer {
     this.subtitleInfo.clear();
     this.subKindByNumber.clear();
     this.userChoseSub = false;
-    if (this.assSubs) {
-      this.assSubs.destroy();
-      this.assSubs = null;
-    }
+    for (const r of this.subRenderers.values()) r.destroy();
+    this.subRenderers.clear();
+    this.subTracks.clear();
+    this.activeSubNumbers.clear();
+    this.subFonts = []; // fresh identity so any in-flight _loadFonts for the old file bails
     if (this.transcoder) {
       this.transcoder.destroy();
       this.transcoder = null;

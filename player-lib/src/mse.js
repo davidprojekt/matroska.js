@@ -210,14 +210,15 @@ class TranscodingTrackFeeder {
  * Feeds streamed subtitle cues for one ASS track, tiled on the same `boundaries` as
  * video/audio. Each window's cues come from clusters the video pass has usually already
  * fetched (cache hits), so this rides along the existing single forward stream. Events
- * persist in libass, so backward seeks need no re-feed; forward seeks re-tile.
+ * persist in the track's SubtitleTrack cache, so backward seeks need no re-feed; forward
+ * seeks re-tile. One feeder runs per ASS track for the whole session.
  */
 class SubtitleFeeder {
   constructor(player, trackNumber, boundaries, sink) {
     this.player = player;
     this.trackNumber = trackNumber;
     this.boundaries = boundaries;
-    this.sink = sink; // AssSubtitleController
+    this.sink = sink; // SubtitleTrack (cue cache)
     this.index = 0;
     this.busy = false;
     this.done = false;
@@ -284,7 +285,9 @@ export class MseController {
     this.mediaSource = null;
     this.video$ = null; // { feeder, pump, track }
     this.audio$ = null;
-    this.subs$ = null; // { feeder, trackNumber } for the active ASS track, or null
+    // One SubtitleFeeder per ASS track, each filling that track's SubtitleTrack cache
+    // continuously from playback start (regardless of which tracks are displayed).
+    this.subFeeders = [];
     this.bufferAheadMs = 5000;
     // Transcoded audio is far slower to produce than a byte-copy remux, so buffer it
     // further ahead to stay clear of the playhead.
@@ -477,11 +480,13 @@ export class MseController {
       }
       // Subtitles ride their own sequential chain (cues are tiny). Fetch a bit further
       // ahead than media; this never blocks the media loop above (runs after it).
-      if (this.subs$) {
-        let sguard = 0;
+      if (this.subFeeders.length) {
         const subTarget = this.video.currentTime * 1000 + aheadMs + 4000;
-        while (!this.subs$.feeder.done && this.subs$.feeder.fedThroughMs() < subTarget && sguard++ < 128) {
-          await this.subs$.feeder.feedOne();
+        for (const feeder of this.subFeeders) {
+          let sguard = 0;
+          while (!feeder.done && feeder.fedThroughMs() < subTarget && sguard++ < 128) {
+            await feeder.feedOne();
+          }
         }
       }
       this.maybeEndOfStream();
@@ -510,20 +515,24 @@ export class MseController {
       stream.pump.clear();
       stream.feeder.seekTo(t);
     }
-    if (this.subs$) this.subs$.feeder.seekTo(t);
+    for (const feeder of this.subFeeders) feeder.seekTo(t);
     this.topUp();
   }
 
-  /** Begin streaming subtitle cues for `trackNumber` into `sink` (AssSubtitleController). */
-  setSubtitleTrack(trackNumber, sink) {
-    const feeder = new SubtitleFeeder(this.player, trackNumber, this.boundaries, sink);
-    feeder.seekTo(this.video.currentTime * 1000);
-    this.subs$ = { trackNumber, feeder };
+  /**
+   * Register the cue caches to stream into — one entry `{ trackNumber, sink }` per ASS
+   * track (sink is its SubtitleTrack). Feeders run for every track from now on so any
+   * track can be displayed instantly from its cache; which tracks actually render is the
+   * player's concern, not ours.
+   */
+  setSubtitleSinks(entries) {
+    const t = this.video.currentTime * 1000;
+    this.subFeeders = entries.map(({ trackNumber, sink }) => {
+      const feeder = new SubtitleFeeder(this.player, trackNumber, this.boundaries, sink);
+      feeder.seekTo(t);
+      return feeder;
+    });
     this.topUp();
-  }
-
-  clearSubtitleTrack() {
-    this.subs$ = null;
   }
 
   /** Switch the active audio track, rebuilding the audio buffer at the playhead. */
