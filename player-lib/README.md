@@ -46,6 +46,15 @@ controls: { preset: 'minimal', chapters: true, subtitles: true }
 Per-control keys: `play`, `seek`, `chapterSkip`, `timeSlider`, `chapterMarkers`, `chapters`,
 `audio`, `subtitles`, `volume`, `fullscreen`, `hotkeys`, `gestures`.
 
+`dock` controls where the bar sits: `'overlay'` (default) draws it over the bottom of the video —
+flush to the edges in the windowed player, a rounded floating pill in fullscreen. `'below'` docks
+it *under* the video image (rounded, always visible, no overlap with subtitles); in fullscreen it
+falls back to the overlay pill.
+
+```js
+controls: { preset: 'full', dock: 'below' }
+```
+
 ### ffmpeg core
 
 `ffmpeg.coreURL` / `ffmpeg.wasmURL` point at any host (they're fetched via `toBlobURL`, so a

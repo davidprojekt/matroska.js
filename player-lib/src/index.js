@@ -4,7 +4,8 @@
 //   import 'mkv-player-ui/style.css';
 //
 //   const player = createPlayer(document.querySelector('#player'), {
-//     controls: 'full',                 // 'full' | 'minimal' | 'none' | { preset, ...perControlBooleans }
+//     controls: 'full',                 // 'full' | 'minimal' | 'none' | { preset, ...perControlBooleans, dock }
+//                                        // dock: 'overlay' (default, bar over the video) | 'below' (bar under it)
 //     transcode: 'auto',                // 'auto' | true | false
 //     title: 'My video',                // default title bar text; per-load override via load(url, { title })
 //                                        // falls back to the MKV segment title, then the URL filename

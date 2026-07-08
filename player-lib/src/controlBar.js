@@ -205,25 +205,53 @@ export function buildControlBar(container, controlsConfig) {
     ? `<div class="mkv-title-bar" data-ref="titleBar" hidden></div>`
     : '';
 
-  container.innerHTML = `
-    <video-player>
-      <media-container class="media-default-skin media-default-skin--video">
-        <video data-ref="video" playsinline crossorigin="anonymous"></video>
+  // `dock: 'below'` renders the bar *under* the video instead of overlaying it (see style.css).
+  // The container gets a mode class and, in docked mode, the video + its overlays are wrapped in
+  // an `.mkv-stage` so they position over the picture only while the bar flows beneath it.
+  const dock =
+    controlsConfig && typeof controlsConfig === 'object' && controlsConfig.dock === 'below'
+      ? 'below'
+      : 'overlay';
+  const containerClass =
+    'media-default-skin media-default-skin--video' +
+    (dock === 'below' ? ' media-default-skin--dock-below' : '');
 
-        ${titleBarMarkup}
-
-        <media-buffering-indicator class="media-buffering-indicator">
+  const videoEl = `<video data-ref="video" playsinline crossorigin="anonymous"></video>`;
+  const bufferingEl = `<media-buffering-indicator class="media-buffering-indicator">
           <div class="media-surface">
             <media-icon name="spinner" class="media-icon"></media-icon>
           </div>
-        </media-buffering-indicator>
+        </media-buffering-indicator>`;
+  const overlayEl = `<div class="media-overlay"></div>`;
+  const hotkeysEl = flags.hotkeys ? hotkeysFrag() : '';
+  const gesturesEl = flags.gestures ? gesturesFrag() : '';
 
+  // Docked: [stage: video + overlays] then the control bar beneath it.
+  // Overlay (default): the original flat order (controls before the scrim, so the skin's
+  // `.media-controls[data-visible] ~ .media-overlay` sibling selector keeps working).
+  const containerInner =
+    dock === 'below'
+      ? `<div class="mkv-stage">
+          ${videoEl}
+          ${titleBarMarkup}
+          ${bufferingEl}
+          ${overlayEl}
+          ${gesturesEl}
+        </div>
         ${controlsMarkup}
+        ${hotkeysEl}`
+      : `${videoEl}
+        ${titleBarMarkup}
+        ${bufferingEl}
+        ${controlsMarkup}
+        ${overlayEl}
+        ${hotkeysEl}
+        ${gesturesEl}`;
 
-        <div class="media-overlay"></div>
-
-        ${flags.hotkeys ? hotkeysFrag() : ''}
-        ${flags.gestures ? gesturesFrag() : ''}
+  container.innerHTML = `
+    <video-player>
+      <media-container class="${containerClass}">
+        ${containerInner}
       </media-container>
     </video-player>`;
 

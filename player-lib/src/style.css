@@ -49,16 +49,83 @@ media-icon > svg { width: 100%; height: 100%; }
   left: 50%;
 }
 
-/* Control-bar placement. The skin's default floating pill (inset 0.5–0.75rem, 1.5rem radius) is
-   kept as-is for fullscreen. In the windowed player the bar runs flush to the player edges — no
-   side/bottom gap, square. The container's `overflow:clip` (skin) clips the strip to the player's
-   rounded bottom corners. Two skin classes on media-container (0,3,0) beat the skin's own
-   `.media-default-skin--video .media-controls` (0,2,0) at both breakpoints. */
-.media-default-skin.media-default-skin--video:not(:fullscreen) .media-controls {
+/* Control-bar placement. Three cases; the skin's default floating pill (inset 0.5–0.75rem,
+   1.5rem radius) is kept as-is for fullscreen. Two skin classes on media-container (0,3,0) beat
+   the skin's own `.media-default-skin--video .media-controls` (0,2,0) at both breakpoints.
+
+   Overlay mode, windowed: run flush to the player edges — no side/bottom gap, square. The
+   container's `overflow:clip` (skin) clips the strip to the player's rounded bottom corners. */
+.media-default-skin.media-default-skin--video:not(:fullscreen):not(.media-default-skin--dock-below)
+  .media-controls {
   inset-inline: 0;
   bottom: 0;
   border-radius: 0;
 }
+
+/* Docked mode (opt-in via `controls.dock: 'below'`): the bar sits BELOW the video as its own
+   strip. The media area hugs the video at its natural size (the video does NOT shrink) and the
+   component simply becomes as tall as video + bar — no fixed box is clipped, so there's no black
+   padding. media-container is a transparent, content-height column: the video "stage" (with all
+   overlays) on top, the bar beneath. Gated to `:not(:fullscreen)`; fullscreen falls back to the
+   skin pill (below). Selectors carry the container classes (+ the `:not(:fullscreen)` pseudo) so
+   they outrank the skin's `.media-default-skin{display:block; height:100%}` and
+   `.media-default-skin--video .media-controls{position:absolute}` regardless of load order.
+
+   The media area's height normally comes from the embedder (player-web sets `aspect-ratio:16/9`
+   on <video-player>). That would force a fixed box and make the video shrink to fit the bar, so
+   in docked mode we neutralise it and let the box grow to video + bar instead. */
+video-player:has(.media-default-skin--dock-below:not(:fullscreen)) {
+  aspect-ratio: auto;
+  height: auto;
+  background: transparent; /* no black bg showing in the gap between video and bar */
+}
+.media-default-skin.media-default-skin--dock-below:not(:fullscreen) {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  background: transparent;
+  overflow: visible;
+  border-radius: 0;
+}
+/* Drop the skin's inset 1px border ring (`.media-default-skin--video::after`) — in docked mode
+   it would frame the whole video+bar column; the video stage carries its own rounding instead. */
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen)::after {
+  box-shadow: none;
+}
+/* The video stage sizes to the video's own ratio at full width (height:auto beats the embedder's
+   `video{height:100%}`), with its own rounding + clip — the video keeps its full size. */
+.media-default-skin.media-default-skin--dock-below:not(:fullscreen) .mkv-stage {
+  position: relative;
+  overflow: clip;
+  border-radius: var(--media-border-radius, 2rem);
+}
+.media-default-skin--dock-below:not(:fullscreen) .mkv-stage video {
+  height: auto;
+}
+/* The bar beneath the video: static flow, rounded, a small gap above; always visible. */
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen) .media-controls {
+  position: static;
+  inset: auto;
+  margin: 0.4rem 0.5rem; /* gap above the video + a little breathing room from the edges */
+  border-radius: 1.5rem;
+}
+/* Always visible in docked windowed mode — override the skin's data-visible fade. */
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen) .media-controls,
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen) .media-controls:not([data-visible]) {
+  opacity: 1;
+  scale: 1;
+  filter: none;
+  pointer-events: auto;
+}
+/* No scrim behind the docked bar (the controls aren't over the picture anymore). */
+.media-default-skin.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen) .media-overlay {
+  background-image: none;
+}
+
+/* Fullscreen falls back to the original skin pill in BOTH modes: the docked rules above are
+   gated off by `:not(:fullscreen)`, so we only need to make the stage fill the screen (it's a
+   plain block otherwise) — the bar then overlays via the skin's own absolute positioning. */
+.media-default-skin--video:fullscreen .mkv-stage { position: absolute; inset: 0; }
 
 /* Previous/next-chapter skip buttons. */
 .vjs-chapter-skip { font-size: 1rem; line-height: 1; padding: 0 0.45rem; }
