@@ -1,0 +1,27 @@
+/* Layout for the Viewer handler component (the player library's own styling loads lazily with
+   it). These few rules are small enough to ship in the always-injected entry stylesheet. */
+.mkvplayer-outer {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	background: #000;
+}
+
+.mkvplayer-stage,
+.mkvplayer-stage video-player,
+.mkvplayer-stage video {
+	width: 100%;
+	height: 100%;
+}
+
+.mkvplayer-status {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	color: #ddd;
+	text-align: center;
+	white-space: pre-wrap;
+	pointer-events: none;
+}

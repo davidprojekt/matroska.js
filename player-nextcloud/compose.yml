@@ -1,0 +1,32 @@
+# Local Nextcloud dev instance for the MKV Player app.
+#
+#   npm run deploy                # build + stage the app into deploy/mkvplayer/
+#   podman-compose up -d          # start Nextcloud (auto-installs on first run, ~30s)
+#   bash dev/sync.sh              # copy the staged app in + enable it (re-run after changes)
+#   # open http://localhost:8080  (login: admin / admin)
+#
+# Uses SQLite (no separate DB container) to keep the dev stack to a single service.
+#
+# NOTE: the app is intentionally NOT bind-mounted here. Bind-mounting into
+# /var/www/html/custom_apps/… makes rootless podman pre-create that mountpoint owned by root,
+# and the NC installer then refuses to start ("Cannot write into apps directory") because the
+# writable custom_apps path isn't writable by www-data. So we install cleanly first, then
+# `podman cp` the staged app into the www-data-owned custom_apps (see dev/sync.sh).
+services:
+  nextcloud:
+    image: docker.io/library/nextcloud:30-apache
+    container_name: mkvplayer-nc
+    ports:
+      - "8080:80"
+    environment:
+      SQLITE_DATABASE: nextcloud
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_ADMIN_PASSWORD: admin
+      NEXTCLOUD_TRUSTED_DOMAINS: "localhost 127.0.0.1"
+    volumes:
+      - nextcloud_html:/var/www/html
+      # Dev-only PHP override so opcache picks up synced app-code changes immediately.
+      - ./dev/php-dev.ini:/usr/local/etc/php/conf.d/zz-mkvplayer-dev.ini:ro
+
+volumes:
+  nextcloud_html:

@@ -1,0 +1,9 @@
+/node_modules
+# Vite build output (emitted into the app root by @nextcloud/vite-config).
+/js
+/css
+/dist
+/assets
+# Staged deployable app for the dev container (scripts/assemble.sh).
+/deploy
+*.tsbuildinfo
