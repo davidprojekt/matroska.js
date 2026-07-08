@@ -496,4 +496,38 @@ mod tests {
             pollster::block_on(ebml(vec![0x7F, 0xFE]).read_variable_size_data_size(0));
         assert_eq!((len, size), (2, Some(16382)));
     }
+
+    /// Regression test for the reported "65536 TB" bug: a real (small) size
+    /// encoded as an 8-octet VINT must mask out the 0x01 descriptor byte
+    /// instead of interpreting it as ~2^56.
+    #[test]
+    fn eight_octet_size_masks_descriptor_byte() {
+        // 0x01 00 00 00 00 00 0f 94 -> real size 0x0f94 = 3988 (NOT 2^56 + ...)
+        let bytes = vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x94];
+        let (len, size) =
+            pollster::block_on(ebml(bytes).read_variable_size_data_size(0));
+        assert_eq!((len, size), (8, Some(3988)));
+
+        // 0x01 FF FF FF FF FF FF FF -> all VINT_DATA bits set -> unknown size.
+        let bytes = vec![0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        let (len, size) =
+            pollster::block_on(ebml(bytes).read_variable_size_data_size(0));
+        assert_eq!((len, size), (8, None));
+    }
+
+    /// Exactly the user's file: a Void with an 8-octet real size must report a
+    /// sane total element size (1-byte id + 8-byte size vint + 3988 payload),
+    /// not a value near u64::MAX.
+    #[test]
+    fn eight_octet_void_reports_sane_element_size() {
+        // 0xEC | 01 00 00 00 00 00 0f 94 | <3988 payload bytes>
+        let mut data = vec![0xEC, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x94];
+        data.extend(std::iter::repeat(0u8).take(3988));
+        let mut it = EbmlIterator::new_endless(0, ebml(data));
+
+        let void = pollster::block_on(it.next()).expect("void element");
+        assert_eq!(void.id, ID_VOID);
+        assert!(matches!(void.payload, EbmlPayload::Void));
+        assert_eq!(void.size, 1 + 8 + 3988);
+    }
 }

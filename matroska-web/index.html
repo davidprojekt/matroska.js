@@ -1257,7 +1257,11 @@
         // EBML elements may declare an "unknown size" (all-ones vint), surfacing as a value far
         // larger than the file; show that as ∞ rather than a nonsensical "65536 TB".
         function fmtElemSize(n) {
-            if (currentSource && currentSource.size && n > currentSource.size) return '∞ unknown';
+            // An unknown-size element surfaces as a sentinel near u64::MAX (well
+            // beyond Number.MAX_SAFE_INTEGER); a declared size larger than the
+            // file is equally nonsensical. Show both as ∞ rather than TB garbage.
+            if (!Number.isSafeInteger(n) ||
+                (currentSource && currentSource.size && n > currentSource.size)) return '∞ unknown';
             return fmtBytes(n);
         }
 
