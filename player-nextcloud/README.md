@@ -48,8 +48,7 @@ universal, incl. Safari) or **Opus** with ffmpeg.wasm.
 The app **bundles an audio-only ffmpeg.wasm core and serves it from your own server**: no external
 requests, works offline. It is **LGPL / AGPL-compatible** (all native/BSD codecs, no x264/x265). It
 decodes Vorbis/Opus/FLAC/ALAC/PCM plus AAC-LC, AC-3, E-AC-3 and DTS core, and encodes AAC-LC/Opus.
-The lossy codecs are royalty-free or have expired core patents (AAC-LC, AC-3, DTS core) — **except
-E-AC-3, which is newer and may still be patented in your jurisdiction; verify before distributing.**
+The lossy codecs are royalty-free or have expired core patents (AAC-LC, AC-3, E-AC-3, DTS core).
 Transcoding is on by default; the bundled `ffmpeg/LICENSE` and `ffmpeg/SOURCE.md` (the LGPL source
 offer) ship alongside the core.
 
