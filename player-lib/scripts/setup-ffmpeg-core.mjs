@@ -1,46 +1,46 @@
-// Copies the single-thread @ffmpeg/core ESM assets into <cwd>/public/ffmpeg/ so they are
-// served same-origin by the consuming app. The ESM build is required because @ffmpeg/ffmpeg
-// spawns a `{type:"module"}` worker that loads the core via dynamic `import()` and reads its
-// `default` export — only the ESM build has `export default createFFmpegCore` (the UMD build
-// exposes it via the CommonJS/global footer, which `import()` can't pick up). We copy rather
-// than `import '@ffmpeg/core/...'` because the package's `exports` map doesn't expose the
-// dist subpaths to the bundler.
+// Copies our custom-built ffmpeg.wasm core (see ../ffmpeg-core/) into the consuming app's
+// public/ffmpeg/ so it is served same-origin — offline-first, no CDN. The core is LGPL, audio-only
+// and royalty-free (built by `npm run build:ffmpeg` in mkv-player-ui); its LICENSE + SOURCE.md are
+// copied alongside to satisfy the LGPL source-availability obligation.
 //
-// This script lives in the mkv-player-ui library but is invoked FROM each app's directory
-// (its predev/prebuild hook: `node ../player-lib/scripts/setup-ffmpeg-core.mjs`), so it
-// resolves paths against `process.cwd()` — the app — not the script's own location. It reads
-// @ffmpeg/core from wherever the install placed it (hoisted to the app, or nested under the
-// library's node_modules) and writes into the app's public/. No-op when @ffmpeg/core isn't
-// installed (transcoding-disabled builds), so the optional dependency stays optional.
+// This is a SEPARATE, cached step from the app build: if the core hasn't been built yet, this
+// warns and skips (the app still builds; transcoding is simply unavailable until the core exists).
+// Invoked FROM each app's directory (its predev/prebuild hook), so it writes into that app's
+// public/; the source is resolved relative to THIS script (inside the library).
 import { existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const cwd = process.cwd();
-const files = ['ffmpeg-core.js', 'ffmpeg-core.wasm'];
-const outDir = resolve(cwd, 'public/ffmpeg');
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const profile = process.env.FFMPEG_PROFILE || 'free-audio';
+// Where the consuming app serves static files from. Vite apps use public/ffmpeg; the Nextcloud
+// app serves from its own dir, so it passes FFMPEG_OUT_DIR=ffmpeg.
+const outDir = resolve(cwd, process.env.FFMPEG_OUT_DIR || 'public/ffmpeg');
+const files = ['ffmpeg-core.js', 'ffmpeg-core.wasm', 'LICENSE', 'SOURCE.md'];
 
-// TRANSCODE=off builds ship no ffmpeg at all — don't copy the core into public/ (Vite would
-// then emit the 31 MB wasm into dist/ even though the JS bundle is transcode-free). Also
-// remove any core left in public/ from an earlier transcode-enabled build so it can't leak.
+// TRANSCODE=off builds ship no ffmpeg at all — clear any core copied by an earlier build so the
+// 31 MB wasm can't leak into dist/.
 if (process.env.TRANSCODE === 'off') {
   rmSync(outDir, { recursive: true, force: true });
   console.log('[ffmpeg] TRANSCODE=off — skipping core copy and clearing public/ffmpeg/.');
   process.exit(0);
 }
 
-// Candidate locations for the installed core, in resolution-priority order: the app's own
-// node_modules (npm usually hoists transitive deps here), then nested under the library.
-const candidates = [
-  resolve(cwd, 'node_modules/@ffmpeg/core/dist/esm'),
-  resolve(cwd, 'node_modules/mkv-player-ui/node_modules/@ffmpeg/core/dist/esm'),
-];
-const srcDir = candidates.find((d) => existsSync(resolve(d, files[0])));
-
-if (!srcDir) {
-  console.log('[ffmpeg] @ffmpeg/core not installed — skipping core copy (transcoding disabled).');
+const srcDir = resolve(scriptDir, '..', 'ffmpeg-core', 'dist', profile);
+if (!existsSync(resolve(srcDir, 'ffmpeg-core.wasm'))) {
+  console.warn(
+    `[ffmpeg] no '${profile}' core at ${srcDir} — audio transcoding will be disabled.\n` +
+      '[ffmpeg] build it with:  (cd path/to/mkv-player-ui && npm run build:ffmpeg)'
+  );
+  // Remove any stale core so the app doesn't serve a mismatched/old one.
+  rmSync(outDir, { recursive: true, force: true });
   process.exit(0);
 }
 
 mkdirSync(outDir, { recursive: true });
-for (const f of files) copyFileSync(resolve(srcDir, f), resolve(outDir, f));
-console.log('[ffmpeg] copied single-thread core → public/ffmpeg/');
+for (const f of files) {
+  const src = resolve(srcDir, f);
+  if (existsSync(src)) copyFileSync(src, resolve(outDir, f));
+}
+console.log(`[ffmpeg] copied '${profile}' core (+ LICENSE, SOURCE.md) → ${outDir}`);

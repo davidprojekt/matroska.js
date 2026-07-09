@@ -1,0 +1,2 @@
+# Compiled ffmpeg.wasm cores are produced by build.sh, not committed.
+/dist/

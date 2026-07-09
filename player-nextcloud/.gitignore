@@ -4,6 +4,8 @@
 /css
 /dist
 /assets
+# Bundled ffmpeg.wasm core, copied from player-lib's build (npm run setup:ffmpeg); not committed.
+/ffmpeg
 # Staged deployable app for the dev container (scripts/assemble.sh).
 /deploy
 *.tsbuildinfo

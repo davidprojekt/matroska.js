@@ -14,7 +14,7 @@ use OCP\Security\CSP\AddContentSecurityPolicyEvent;
  * Relaxes Nextcloud's default CSP so the player's WebAssembly + module workers can run:
  *  - WASM compilation (mkv-player remuxer, jassub/libass, ffmpeg) needs 'wasm-unsafe-eval'.
  *  - jassub and ffmpeg spawn workers, and ffmpeg loads its core via a blob: worker (toBlobURL),
- *    so worker-src/child-src must allow blob: (and 'self' for our own emitted worker assets).
+ *    so worker-src must allow blob: (and 'self' for our own emitted worker assets).
  *  - MSE plays from a blob: MediaSource URL and subtitles/fonts from blob: URLs → media-src blob:.
  *  - When an admin points ffmpeg at an external CDN, that origin must be reachable (connect-src)
  *    to fetch the core/wasm.
@@ -38,14 +38,17 @@ class CspListener implements IEventListener {
 		$policy->allowEvalWasm(true);
 		$policy->addAllowedWorkerSrcDomain("'self'");
 		$policy->addAllowedWorkerSrcDomain('blob:');
-		$policy->addAllowedChildSrcDomain('blob:');
 		$policy->addAllowedMediaDomain('blob:');
 
-		// Allow fetching an externally-hosted ffmpeg core/wasm, if configured.
-		foreach ([$this->config->getCoreUrl(), $this->config->getWasmUrl()] as $url) {
-			$origin = $this->originOf($url);
-			if ($origin !== null) {
-				$policy->addAllowedConnectDomain($origin);
+		// The bundled ffmpeg core is served same-origin ('self' — connect-src already allows it).
+		// Only when the admin opted in to an EXTERNAL ffmpeg server do we widen connect-src to it.
+		$external = $this->config->getExternalUrls();
+		if ($external !== null) {
+			foreach ([$external['coreURL'], $external['wasmURL']] as $url) {
+				$origin = $this->originOf($url);
+				if ($origin !== null) {
+					$policy->addAllowedConnectDomain($origin);
+				}
 			}
 		}
 

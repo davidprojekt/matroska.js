@@ -12,7 +12,7 @@ rm -rf "$out"
 mkdir -p "$out"
 
 # Copy each deployable path that exists (lib/img/templates/l10n appear in later phases).
-for p in appinfo lib js css dist assets img templates l10n composer.json; do
+for p in appinfo lib js css dist assets ffmpeg img templates l10n composer.json; do
   [ -e "$here/$p" ] && cp -a "$here/$p" "$out/"
 done
 echo "[assemble] staged → deploy/mkvplayer/ ($(find "$out" -type f | wc -l) files)"

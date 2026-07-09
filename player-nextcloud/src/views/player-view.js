@@ -7,13 +7,28 @@
 // The heavy player library (WASM remuxer + workers) is loaded lazily on first open so it stays
 // out of the always-injected entry bundle.
 import { loadState } from '@nextcloud/initial-state'
+import { generateFilePath } from '@nextcloud/router'
 
-/** Read the app config seeded via initial state (ffmpeg URLs, transcode/debug flags). */
+/** Read the app config seeded via initial state (transcode/debug/external flags). */
 function loadConfig() {
 	try {
 		return loadState('mkvplayer', 'config') || {}
 	} catch (e) {
 		return {}
+	}
+}
+
+/**
+ * Where to load the ffmpeg core from: the admin's external URLs if opted in, otherwise the
+ * royalty-free core bundled with the app and served same-origin (offline).
+ */
+function resolveFfmpeg(config) {
+	if (config.external && config.external.coreURL && config.external.wasmURL) {
+		return config.external
+	}
+	return {
+		coreURL: generateFilePath('mkvplayer', '', 'ffmpeg/ffmpeg-core.js'),
+		wasmURL: generateFilePath('mkvplayer', '', 'ffmpeg/ffmpeg-core.wasm'),
 	}
 }
 
@@ -79,9 +94,10 @@ export default {
 
 				this.player = createPlayer(this.$refs.stage, {
 					controls: 'full',
-					// No ffmpeg core ships with the app; only transcode when an admin enabled it.
+					// Transcoding uses the bundled same-origin core by default (or the admin's
+					// external URLs when opted in); resolveFfmpeg() picks between them.
 					transcode: cfg.transcodeEnabled ? 'auto' : false,
-					ffmpeg: cfg.ffmpeg,
+					ffmpeg: resolveFfmpeg(cfg),
 					onStatus: (msg) => {
 						this.statusMessage = msg
 					},

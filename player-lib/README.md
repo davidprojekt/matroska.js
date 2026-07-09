@@ -55,13 +55,40 @@ falls back to the overlay pill.
 controls: { preset: 'full', dock: 'below' }
 ```
 
-### ffmpeg core
+### ffmpeg core (audio transcoding)
 
-`ffmpeg.coreURL` / `ffmpeg.wasmURL` point at any host (they're fetched via `toBlobURL`, so a
-cross-origin CDN must send permissive CORS). When omitted they default to
-`${baseURL}ffmpeg/ffmpeg-core.js` (same-origin), and `scripts/setup-ffmpeg-core.mjs` copies
-the single-thread core into the consuming app's `public/ffmpeg/`. Set `transcode: false` to
-disable transcoding at runtime.
+ffmpeg.wasm is used only to transcode **audio** tracks the browser can't decode natively in the
+remuxed fMP4 (video is always remuxed by the `mkv-player` WASM — ffmpeg never touches video). The
+transcoder outputs **AAC-LC** (preferred — encodes reliably, universal MSE incl. Safari) or **Opus**
+(fallback) — both royalty-free (AAC-LC's core patents have expired). Never a GPL/patent video codec.
+
+**The bundled core is a custom build, not `@ffmpeg/core`.** The stock npm core is built
+`--enable-gpl --enable-nonfree`, which is non-redistributable and patent-encumbered. Instead,
+`ffmpeg-core/` compiles our own **LGPL, audio-only** core (all native/BSD codecs — AGPL-compatible,
+no x264/x265). It decodes Vorbis/Opus/FLAC/ALAC/WavPack/TTA/PCM plus AAC-LC, AC-3, E-AC-3 and DTS
+core, and encodes AAC-LC/Opus/FLAC. Copyleft is clean (LGPL); the included lossy codecs are either
+royalty-free or have expired core patents (AAC-LC, AC-3, DTS core) — **except E-AC-3, which is newer
+and may still be patented in your jurisdiction**. HE-AAC/xHE-AAC, TrueHD/MLP and DTS-HD are excluded.
+
+```sh
+npm run build:ffmpeg                       # builds the default `free-audio` core (Docker; slow once)
+```
+
+This is a **separate, cached** step — it isn't part of the app build. `scripts/setup-ffmpeg-core.mjs`
+then copies the built `ffmpeg-core/dist/<profile>/` (core + `LICENSE` + `SOURCE.md`, the LGPL source
+offer) into the consuming app's `public/ffmpeg/`, served same-origin. If the core hasn't been built,
+the setup script warns and skips — the app still runs, transcoding just stays off.
+
+Need the remaining still-patented lossless codecs (TrueHD/MLP, DTS-HD)? Build the opt-in `full`
+profile yourself, accepting the patent responsibility — see `ffmpeg-core/README.md`. The shipped
+default stays `free-audio`.
+
+`ffmpeg.coreURL` / `ffmpeg.wasmURL` let a consumer point at any host (fetched via `toBlobURL`, so a
+cross-origin host must send permissive CORS); when omitted they default to
+`${baseURL}ffmpeg/ffmpeg-core.js` (same-origin). `transcode: false` disables transcoding at runtime;
+a `TRANSCODE=off` build (with the `ffmpeg-stub.js` alias) strips ffmpeg from the bundle entirely.
+AAC-LC is the universal fallback output, so transcoding works even where Opus-in-MP4 isn't
+supported (e.g. Safari).
 
 ## Required consumer Vite config
 

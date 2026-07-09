@@ -7,35 +7,25 @@ namespace OCA\MkvPlayer\Service;
 use OCP\AppFramework\Services\IAppConfig;
 
 /**
- * Reads/writes the app's admin configuration and shapes it for the frontend. No ffmpeg core is
- * bundled with the app; an administrator points these at an ffmpeg.wasm build (single-thread
- * ESM core + wasm). Until both URLs are set and transcoding is enabled, audio transcoding stays
- * off and unsupported audio codecs simply don't play (video still remuxes).
+ * Reads/writes the app's admin configuration and shapes it for the frontend.
+ *
+ * The app bundles a royalty-free, audio-only ffmpeg.wasm core and serves it same-origin (offline,
+ * no external calls) — that's the default. Transcoding audio the browser can't play natively is on
+ * by default and uses that bundled core. An admin can optionally opt in to loading ffmpeg from an
+ * external server (e.g. a self-hosted fuller build); only then are the core/wasm URLs used.
  */
 class ConfigService {
-	public const KEY_CORE_URL = 'ffmpeg_core_url';
-	public const KEY_WASM_URL = 'ffmpeg_wasm_url';
 	public const KEY_TRANSCODE = 'transcode_enabled';
 	public const KEY_DEBUG = 'debug';
+	public const KEY_EXTERNAL = 'ffmpeg_external';
+	public const KEY_CORE_URL = 'ffmpeg_core_url';
+	public const KEY_WASM_URL = 'ffmpeg_wasm_url';
 
-	// Default to the public single-thread ESM @ffmpeg/core on jsDelivr, with transcoding enabled
-	// out of the box. jsDelivr sends permissive CORS, and CspListener adds its origin to
-	// connect-src. Admins can point these at a self-hosted/free-codec build instead.
-	public const DEFAULT_CORE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js';
-	public const DEFAULT_WASM_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm';
 	public const DEFAULT_TRANSCODE = true;
 
 	public function __construct(
 		private IAppConfig $appConfig,
 	) {
-	}
-
-	public function getCoreUrl(): string {
-		return $this->appConfig->getAppValueString(self::KEY_CORE_URL, self::DEFAULT_CORE_URL);
-	}
-
-	public function getWasmUrl(): string {
-		return $this->appConfig->getAppValueString(self::KEY_WASM_URL, self::DEFAULT_WASM_URL);
 	}
 
 	public function isTranscodeEnabled(): bool {
@@ -46,25 +36,43 @@ class ConfigService {
 		return $this->appConfig->getAppValueBool(self::KEY_DEBUG, false);
 	}
 
-	public function setConfig(string $coreUrl, string $wasmUrl, bool $transcodeEnabled): void {
-		$this->appConfig->setAppValueString(self::KEY_CORE_URL, trim($coreUrl));
-		$this->appConfig->setAppValueString(self::KEY_WASM_URL, trim($wasmUrl));
-		$this->appConfig->setAppValueBool(self::KEY_TRANSCODE, $transcodeEnabled);
+	/** Whether to load ffmpeg from an external server instead of the bundled same-origin core. */
+	public function isExternal(): bool {
+		return $this->appConfig->getAppValueBool(self::KEY_EXTERNAL, false);
+	}
+
+	public function getCoreUrl(): string {
+		return $this->appConfig->getAppValueString(self::KEY_CORE_URL, '');
+	}
+
+	public function getWasmUrl(): string {
+		return $this->appConfig->getAppValueString(self::KEY_WASM_URL, '');
+	}
+
+	/** External core/wasm URLs, but only when the external opt-in is on and both are set. */
+	public function getExternalUrls(): ?array {
+		if (!$this->isExternal()) {
+			return null;
+		}
+		$core = trim($this->getCoreUrl());
+		$wasm = trim($this->getWasmUrl());
+		if ($core === '' || $wasm === '') {
+			return null;
+		}
+		return ['coreURL' => $core, 'wasmURL' => $wasm];
 	}
 
 	/**
-	 * The shape consumed by the frontend (main.js / the Viewer component), via initial state.
+	 * The shape consumed by the frontend (the Viewer component), via initial state. When `external`
+	 * is null the frontend uses the bundled same-origin core (URL built client-side).
 	 *
-	 * @return array{ffmpeg: array{coreURL: string, wasmURL: string}, transcodeEnabled: bool, debug: bool}
+	 * @return array{transcodeEnabled: bool, debug: bool, external: ?array{coreURL: string, wasmURL: string}}
 	 */
 	public function getFrontendConfig(): array {
-		$core = $this->getCoreUrl();
-		$wasm = $this->getWasmUrl();
 		return [
-			'ffmpeg' => ['coreURL' => $core, 'wasmURL' => $wasm],
-			// Only actually transcode when enabled AND both URLs are configured.
-			'transcodeEnabled' => $this->isTranscodeEnabled() && $core !== '' && $wasm !== '',
+			'transcodeEnabled' => $this->isTranscodeEnabled(),
 			'debug' => $this->isDebugEnabled(),
+			'external' => $this->getExternalUrls(),
 		];
 	}
 }

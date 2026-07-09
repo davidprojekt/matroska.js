@@ -17,7 +17,7 @@ ffmpeg core is bundled; an administrator configures the core/wasm URLs in the ad
     <category>multimedia</category>
     <bugs>https://github.com/davidschneider/play-mkv.js/issues</bugs>
     <dependencies>
-        <nextcloud min-version="28" max-version="31"/>
+        <nextcloud min-version="28" max-version="34"/>
     </dependencies>
     <settings>
         <admin-section>OCA\MkvPlayer\Settings\AdminSection</admin-section>

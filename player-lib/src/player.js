@@ -21,10 +21,11 @@ const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']
 // ASS/SSA codecs rendered via libass (JASSUB) over a canvas overlay.
 const ASS_SUB_CODECS = new Set(['S_TEXT/ASS', 'S_TEXT/SSA']);
 
-// MSE mime of the transcoder's output (AAC-in-MP4). Kept in sync with audioTranscoder.js.
-// Hardcoded (rather than imported) so referencing it doesn't pull @ffmpeg/* into the main
-// chunk — the transcoder module is only reached via a dynamic import.
-const TRANSCODE_OUT_MIME = 'audio/mp4; codecs="mp4a.40.2"';
+// Royalty-free MSE mimes the transcoder may output (AAC-LC preferred, Opus fallback). Kept in
+// sync with audioTranscoder.js's OUTPUTS. Hardcoded (rather than imported) so referencing it
+// doesn't pull @ffmpeg/* into the main chunk — the transcoder module is only reached via a
+// dynamic import.
+const TRANSCODE_OUT_MIMES = ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="opus"'];
 
 const subKind = (t) =>
   ASS_SUB_CODECS.has(t.codec_id) ? 'ass' : TEXT_SUB_CODECS.has(t.codec_id) ? 'text' : null;
@@ -225,8 +226,10 @@ export class MkvPlayer {
     this._emit('tracks', tracks);
 
     // Audio whose codec the browser can't decode natively can be transcoded in-browser with
-    // ffmpeg.wasm (gated on the `transcode` option and Opus/AAC-in-MP4 being playable).
-    const canTranscode = this._wantTranscode && MediaSource.isTypeSupported(TRANSCODE_OUT_MIME);
+    // ffmpeg.wasm (gated on the `transcode` option and a royalty-free output — Opus or AAC-LC —
+    // being MSE-appendable here; AAC-LC covers browsers without Opus-in-MP4 such as Safari).
+    const canTranscode =
+      this._wantTranscode && TRANSCODE_OUT_MIMES.some((m) => MediaSource.isTypeSupported(m));
     const audioPlayable = (t) => nativelySupported(t) || canTranscode;
 
     // Spin up the transcoder (lazily — it only downloads the ffmpeg core on first use) when

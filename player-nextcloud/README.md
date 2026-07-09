@@ -3,7 +3,7 @@
 Plays Matroska `.mkv` / `.mka` files directly in Nextcloud's built-in **Viewer**. The player
 itself (WASM MKV→fMP4 remux + MSE + video.js controls, libass subtitles, optional ffmpeg.wasm
 audio transcoding) is the `mkv-player-ui` library (`../player-lib`); this app wraps it in a Viewer
-handler and adds admin settings for the ffmpeg core URLs.
+handler, bundles a royalty-free ffmpeg.wasm core served from the instance, and adds admin settings.
 
 ## Build
 
@@ -39,14 +39,37 @@ staged (`scripts/assemble.sh`) — never `node_modules`.
 Teardown: `podman-compose down` (add `-v` / `podman volume rm player-nextcloud_nextcloud_html` to
 wipe the instance).
 
-## Audio transcoding (admin settings)
+## Audio transcoding (offline)
 
-Matroska video always plays via in-browser remuxing. Audio codecs the browser can't decode
-natively (AC-3, DTS, …) can optionally be transcoded with ffmpeg.wasm — but **no ffmpeg core ships
-with the app**. Under *Administration settings → MKV Player*, enable transcoding and provide the
-URLs of an ffmpeg.wasm build (single-thread ESM `ffmpeg-core.js` + `ffmpeg-core.wasm`). The URLs
-must be reachable by the browser (same-origin, or a host sending permissive CORS — the app adds the
-configured origin to the CSP `connect-src` automatically). Until configured, transcoding stays off.
+Matroska video always plays via in-browser remuxing. Audio codecs the browser can't decode natively
+in the remuxed MP4 (Vorbis, AC-3, E-AC-3, DTS core, …) are transcoded to **AAC-LC** (preferred —
+universal, incl. Safari) or **Opus** with ffmpeg.wasm.
+
+The app **bundles an audio-only ffmpeg.wasm core and serves it from your own server**: no external
+requests, works offline. It is **LGPL / AGPL-compatible** (all native/BSD codecs, no x264/x265). It
+decodes Vorbis/Opus/FLAC/ALAC/PCM plus AAC-LC, AC-3, E-AC-3 and DTS core, and encodes AAC-LC/Opus.
+The lossy codecs are royalty-free or have expired core patents (AAC-LC, AC-3, DTS core) — **except
+E-AC-3, which is newer and may still be patented in your jurisdiction; verify before distributing.**
+Transcoding is on by default; the bundled `ffmpeg/LICENSE` and `ffmpeg/SOURCE.md` (the LGPL source
+offer) ship alongside the core.
+
+The core is **not committed** — it's compiled from source (see `../player-lib/ffmpeg-core/`) and
+copied in at deploy time. Build order:
+
+```sh
+(cd ../player-lib && npm run build:ffmpeg)   # compile the core (Docker; slow once)
+npm run deploy                                # build:app → setup:ffmpeg (copies the core) → assemble
+```
+
+If the core hasn't been built, `deploy` still works but transcoding is disabled until it exists.
+
+**Still-patent-encumbered lossless codecs (TrueHD/MLP, DTS-HD) and HE-AAC** are excluded. To support
+them, build a fuller ffmpeg.wasm yourself (`FFMPEG_PROFILE=full` — see
+`player-lib/ffmpeg-core/README.md`), accepting the patent obligations, and point the app at it:
+*Administration → MKV Player → **Advanced: load ffmpeg.wasm from an external server*** + the
+core/wasm URLs. ⚠️ That external option
+makes each viewer's browser contact the third-party host (privacy: exposes their IP); it's off by
+default. The app adds the configured origin to the CSP `connect-src` only when it's enabled.
 
 ## File types
 

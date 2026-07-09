@@ -14,7 +14,7 @@
 # `podman cp` the staged app into the www-data-owned custom_apps (see dev/sync.sh).
 services:
   nextcloud:
-    image: docker.io/library/nextcloud:30-apache
+    image: docker.io/library/nextcloud:34-apache
     container_name: mkvplayer-nc
     ports:
       - "8080:80"
