@@ -9,8 +9,9 @@
 	<div id="mkvplayer-license" class="section">
 		<h2>{{ 'MKV Player license' }}</h2>
 		<p class="settings-hint">
-			A valid license removes the player watermark. The key is validated on this server; it is
-			never sent to viewers.
+			A valid license removes the player watermark. Validation runs entirely offline and
+			locally on this server — the key is never sent to any external server for validation,
+			and it is never sent to viewers.
 		</p>
 
 		<div class="mkvplayer-license__field">
@@ -123,23 +124,35 @@ export default {
 <style scoped>
 .mkvplayer-license__field {
 	display: flex;
-	gap: 0.5rem;
+	gap: 0.75rem;
 	align-items: center;
 	flex-wrap: wrap;
 	max-width: 40rem;
-	margin-top: 0.5rem;
+	margin-top: 0.75rem;
 }
 .mkvplayer-license__field input[type='password'] {
-	flex: 1 1 20rem;
+	flex: 1 1 24rem;
+	min-width: 18rem;
+	height: 44px;
+	box-sizing: border-box;
+	padding: 0 0.75rem;
+}
+.mkvplayer-license__field button {
+	flex: none;
+	height: 44px;
 }
 .mkvplayer-license__status {
 	font-weight: 600;
+	margin-top: 0.5rem;
 }
 .mkvplayer-license__status.is-valid {
 	color: var(--color-success, #2d7b41);
 }
 .mkvplayer-license__status.is-invalid {
 	color: var(--color-error, #c9302c);
+}
+.mkvplayer-license__buy {
+	margin-top: 1rem;
 }
 .mkvplayer-license__buy .button {
 	display: inline-block;
