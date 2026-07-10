@@ -11,11 +11,23 @@ uploaded.
 
 A full MKV web player. The container is parsed in Rust/WASM and **remuxed on the fly
 into fragmented MP4 (fMP4)** that is fed to a `<video>` element through Media Source
-Extensions — no transcoding, nothing uploaded. The browser plays it as long as the
-underlying codecs are web-compatible, with **switchable audio and subtitle tracks**
-and seeking. **ASS/SSA subtitles are rendered via [libass](https://github.com/libass/libass)
-(through [JASSUB](https://github.com/ThaUnknown/jassub)) and work well.** (Plain-text /
-WebVTT subtitle tracks are **not currently working**.)
+Extensions — no upload, and video is never transcoded. The browser plays it as long as
+the video codec is web-compatible, with **switchable audio and subtitle tracks**,
+chapters, and seeking. Audio in a codec the browser can't decode is **transcoded
+in-browser** by a royalty-free [ffmpeg.wasm](https://ffmpegwasm.netlify.app/) core
+(offline-first, no CDN dependency); video still plays untouched.
+
+Two subtitle families are rendered over a canvas overlay, and up to **two can show at
+once** (e.g. dialogue + signs):
+
+- **ASS/SSA** via [libass](https://github.com/libass/libass) (through
+  [JASSUB](https://github.com/ThaUnknown/jassub)), with embedded fonts.
+- **PGS** (`S_HDMV/PGS`, Blu-ray bitmap subtitles) via
+  [libpgs](https://github.com/Arcus92/libpgs-js).
+
+Per-block zlib-compressed subtitle tracks (mkvmerge's default) are decompressed
+transparently. Plain-text / WebVTT subtitle tracks are **not currently working**;
+DVD (VobSub) and DVBSUB bitmap subtitles are **not yet supported**.
 
 The WASM side extracts encoded frames (copying length-prefixed NALs straight through),
 reconstructs DTS/composition offsets for B-frames, and writes fMP4 init + media
@@ -31,10 +43,11 @@ This is a Cargo workspace + a small web frontend:
 | ------------- | ---------------------------------------------------------------------------------------------- |
 | `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. (MIT) |
 | `ebml-wasm`   | The **EBML/Matroska parser core**: a forward-only **async iterator** over `EbmlElement`s plus the byte sources (`FetchSource`, `FsSource`, `MemSource`), exposed to JS via `wasm-bindgen` (`EbmlReader`, `FetchSourceEbml`). Container parsing only — no remuxing. (MIT) |
-| `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `cue_offset()`, `subtitles()`, and `cue_times()`. The fMP4 box writer lives in `fmp4.rs`, block/sample extraction in `remux.rs`, the seek index in `index.rs`, track/codec mapping in `track.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
-| `player-lib`  | **`mkv-player-ui`** — the **reusable player library** both frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), and in-browser audio transcoding via ffmpeg.wasm. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable) and loads the ffmpeg core from a caller-supplied URL. (AGPL-3.0) |
+| `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `audio_chunk()` (for transcoding), `cue_offset()`, `cue_times()`, `chapters()`, `font_attachments()`, and the subtitle accessors `subtitles()` (text→WebVTT), `subtitle_header()` / `subtitle_events()` (ASS), and `subtitle_bitmap_events()` (PGS→`.sup`). The fMP4 box writer lives in `fmp4.rs`, block/sample extraction and subtitle-block decompression in `remux.rs` / `track.rs`, the seek index in `index.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
+| `player-lib`  | **`mkv-player-ui`** — the **reusable player library** all frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), PGS subtitles via libpgs, and in-browser audio transcoding via a bundled royalty-free ffmpeg.wasm core. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable). (AGPL-3.0) |
 | `player-web`  | The **MKV player demo**: a URL box, local-file picker, and copy-shareable-link button around `mkv-player-ui`. (AGPL-3.0) |
 | `player-embed`| A **headless embeddable** build: no chrome, just the video filling the frame, wrapping `mkv-player-ui` with `controls: 'full'`. Loads the video given in the embedding URL (`?src=`), so it can be dropped into an `<iframe>`. (AGPL-3.0) |
+| `player-nextcloud`| A **[Nextcloud](https://nextcloud.com/) app** that plays `.mkv` / `.mka` files in the Files **Viewer** via `mkv-player-ui`. (AGPL-3.0) |
 | `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. |
 
 ## Supported codecs
@@ -58,12 +71,17 @@ listed as *not muxable*; tracks it wraps but the browser can't decode are flagge
 | Audio     | `A_FLAC`                           | FLAC                 | `fLaC`            |
 | Audio     | `A_MPEG/L3`                        | MP3                  | `mp4a` (`.6B`)    |
 | Subtitle  | `S_TEXT/ASS`, `S_TEXT/SSA`         | rendered via libass (JASSUB) | (extracted)   |
+| Subtitle  | `S_HDMV/PGS`                       | Blu-ray bitmap, rendered via libpgs | (extracted, reconstructed `.sup`) |
 | Subtitle  | `S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASCII` | text → WebVTT — **not working yet** | (extracted) |
 
-Anything else (DTS, TrueHD, Vorbis, PCM; MPEG-2/older video) is not muxable today and
-would need transcoding (planned via ffmpeg-wasm). MP3 frame durations assume MPEG-1
-Layer III (1152 samples/frame); the rarer MPEG-2/2.5 Layer III (576) is not yet
-distinguished.
+Audio the browser can't decode natively (e.g. AC-3/E-AC-3 in some browsers) is
+transcoded in-browser to AAC (or Opus) by the bundled ffmpeg.wasm core, so it plays
+without a native decoder. Other audio codecs not listed above (DTS, TrueHD, Vorbis, PCM)
+route through the same transcoder. Video is never transcoded, so an undecodable video
+codec (e.g. HEVC in Firefox, or MPEG-2/older) is listed but won't play. MP3 frame
+durations assume MPEG-1 Layer III (1152 samples/frame); the rarer MPEG-2/2.5 Layer III
+(576) is not yet distinguished. DVD (VobSub) and DVBSUB bitmap subtitles are not yet
+supported.
 
 ## Build & run
 
@@ -83,7 +101,7 @@ npm start            # simple-http-server -i --cors --port 8501
 
 # 3. In another shell, install the shared player library, then run the dev server.
 cd ../player-lib
-npm install          # installs the library's deps (video.js, jassub, ffmpeg.wasm)
+npm install          # installs the library's deps (video.js, jassub, libpgs, ffmpeg.wasm)
 cd ../player-web
 npm install
 npm run dev          # open the printed Vite URL
