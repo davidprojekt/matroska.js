@@ -14,6 +14,7 @@ futures = "0.3"
 js-sys = "0.3.99"
 web-sys = { version = "0.3.99", features = ["console", "ReadableStream", "ReadableStreamDefaultReader"] }
 lru = "0.18.0"
+miniz_oxide = "0.8"
 wasm-bindgen = "0.2.122"
 wasm-bindgen-futures = "0.4.72"
 

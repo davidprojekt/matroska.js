@@ -20,7 +20,7 @@ use ebml_wasm::matroska_data::{
 use crate::remux::{
     audio_samples, cues_to_webvtt, parse_block, video_samples, BlockFrames, SubtitleCue, TimedFrame,
 };
-use crate::track::{parse_tracks, TrackData, TrackType};
+use crate::track::{decode_block_frame, parse_tracks, Compression, TrackData, TrackType};
 
 const DEFAULT_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 /// EBML IDs that `SeekHead` may point at and we care about.
@@ -505,6 +505,7 @@ where
     }
 
     async fn collect_subtitle_cues(&self, track_number: u64, start: u64) -> Vec<SubtitleCue> {
+        let comp = self.track(track_number).and_then(|t| t.compression.clone());
         let mut cues = Vec::new();
         let mut clusters = self.iter_at(start, Some(self.segment_end));
         while let Some(el) = clusters.next().await {
@@ -517,7 +518,7 @@ where
             let buffered = self
                 .buffer_range(cluster.current, cluster.end.unwrap_or(self.segment_end))
                 .await;
-            walk_cluster_subtitles(buffered, track_number, self.timestamp_scale_ns, &mut cues).await;
+            walk_cluster_subtitles(buffered, track_number, self.timestamp_scale_ns, comp.as_ref(), &mut cues).await;
         }
         cues
     }
@@ -628,14 +629,22 @@ where
     /// Like [`Self::collect_subtitle_cues`] but bounded: walks clusters from `start_offset`
     /// and stops at the first cluster beginning at/after `end_ms` (peeked cheaply), so a
     /// window's events come from only the clusters that cover it.
+    ///
+    /// We always read the first cluster (coarse Cues can point at a cluster starting before
+    /// the window) and only break *after* that once a cluster begins at/after `end_ms` — the
+    /// gate is "have we read a cluster yet", NOT "have we found a cue yet". Gating on cues
+    /// would scan to EOF on any window that happens to contain no cue for this track, which is
+    /// common for sparse tracks (see [`Self::collect_bitmap_cues_range`]).
     async fn collect_subtitle_cues_range(
         &self,
         track_number: u64,
         start_offset: u64,
         end_ms: u64,
     ) -> Vec<SubtitleCue> {
+        let comp = self.track(track_number).and_then(|t| t.compression.clone());
         let end_ticks = (end_ms * 1_000_000 / self.timestamp_scale_ns.max(1)) as i64;
         let mut cues = Vec::new();
+        let mut read_any = false;
         let mut clusters = self.iter_at(start_offset, Some(self.segment_end));
         while let Some(el) = clusters.next().await {
             if el.id != ID_CLUSTER {
@@ -647,11 +656,76 @@ where
             let cstart = cluster.current;
             let cend = cluster.end.unwrap_or(self.segment_end);
             let cluster_time = self.peek_cluster_time(cstart, cend).await;
-            if !cues.is_empty() && cluster_time >= end_ticks {
+            if read_any && cluster_time >= end_ticks {
                 break;
             }
             let buffered = self.buffer_range(cstart, cend).await;
-            walk_cluster_subtitles(buffered, track_number, self.timestamp_scale_ns, &mut cues).await;
+            walk_cluster_subtitles(buffered, track_number, self.timestamp_scale_ns, comp.as_ref(), &mut cues).await;
+            read_any = true;
+        }
+        cues
+    }
+
+    /// Bitmap (`S_HDMV/PGS`) subtitle display sets whose blocks fall in
+    /// `[start_ms, end_ms)` of `track_number`, as JSON `[{"pts":ms,"sup":"<base64>"}]`.
+    /// Each `sup` is the reconstructed `.sup` fragment for one display set (see
+    /// [`build_sup_fragment`]); JS decodes it, dedups on `pts`, and concatenates the
+    /// fragments into the growing `.sup` buffer it hands to libpgs-js. Windowed like
+    /// [`Self::subtitle_events_json`] so it rides the existing forward stream. Every
+    /// block is kept — including empty "clear" display sets, which erase the prior cue.
+    pub async fn subtitle_bitmap_events_json(&self, track_number: u64, start_ms: u64, end_ms: u64) -> String {
+        let is_sub = self
+            .track(track_number)
+            .map(|t| t.track_type == Some(TrackType::Subtitle))
+            .unwrap_or(false);
+        if !is_sub {
+            return "[]".to_string();
+        }
+        let Some(start_offset) = self.cue_offset(track_number, start_ms) else {
+            return "[]".to_string();
+        };
+        let cues = self
+            .collect_bitmap_cues_range(track_number, start_offset, end_ms)
+            .await;
+        let items: Vec<String> = cues
+            .iter()
+            .map(|(pts, sup)| format!("{{\"pts\":{},\"sup\":\"{}\"}}", pts, base64_encode(sup)))
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
+    /// Like [`Self::collect_subtitle_cues_range`] but yields `(pts_ms, sup_fragment)`
+    /// pairs for a bitmap track instead of text cues. Bitmap (PGS) tracks are sparse — most
+    /// windows contain no display set — so the stop gate is "read at least the first cluster,
+    /// then break past the window end" rather than "keep going until a cue is found" (which
+    /// would scan to EOF on every gap, reading the whole file and starving media playback).
+    async fn collect_bitmap_cues_range(
+        &self,
+        track_number: u64,
+        start_offset: u64,
+        end_ms: u64,
+    ) -> Vec<(u64, Vec<u8>)> {
+        let comp = self.track(track_number).and_then(|t| t.compression.clone());
+        let end_ticks = (end_ms * 1_000_000 / self.timestamp_scale_ns.max(1)) as i64;
+        let mut cues = Vec::new();
+        let mut read_any = false;
+        let mut clusters = self.iter_at(start_offset, Some(self.segment_end));
+        while let Some(el) = clusters.next().await {
+            if el.id != ID_CLUSTER {
+                continue;
+            }
+            let EbmlPayload::Master(cluster) = el.payload else {
+                continue;
+            };
+            let cstart = cluster.current;
+            let cend = cluster.end.unwrap_or(self.segment_end);
+            let cluster_time = self.peek_cluster_time(cstart, cend).await;
+            if read_any && cluster_time >= end_ticks {
+                break;
+            }
+            let buffered = self.buffer_range(cstart, cend).await;
+            walk_cluster_bitmap(buffered, track_number, self.timestamp_scale_ns, comp.as_ref(), &mut cues).await;
+            read_any = true;
         }
         cues
     }
@@ -803,6 +877,7 @@ async fn walk_cluster_subtitles<M: EbmlSource + PartialEq + Clone>(
     mut cluster: EbmlIterator<M>,
     track_number: u64,
     scale_ns: u64,
+    comp: Option<&Compression>,
     cues: &mut Vec<SubtitleCue>,
 ) {
     let to_ms = |ticks: i64| -> u64 { (ticks.max(0) as u128 * scale_ns as u128 / 1_000_000) as u64 };
@@ -816,10 +891,11 @@ async fn walk_cluster_subtitles<M: EbmlSource + PartialEq + Clone>(
                     if b.track_number == track_number {
                         let start_ms = to_ms(cluster_time + b.rel_timecode as i64);
                         for f in &b.frames {
+                            let Some(data) = decode_block_frame(comp, f) else { continue };
                             cues.push(SubtitleCue {
                                 start_ms,
                                 end_ms: start_ms + 4000,
-                                text: String::from_utf8_lossy(f).into_owned(),
+                                text: String::from_utf8_lossy(&data).into_owned(),
                             });
                         }
                     }
@@ -844,11 +920,67 @@ async fn walk_cluster_subtitles<M: EbmlSource + PartialEq + Clone>(
                             let start_ms = to_ms(cluster_time + b.rel_timecode as i64);
                             let dur_ms = duration_ticks.map(|d| to_ms(d as i64)).unwrap_or(4000);
                             for f in &b.frames {
+                                let Some(data) = decode_block_frame(comp, f) else { continue };
                                 cues.push(SubtitleCue {
                                     start_ms,
                                     end_ms: start_ms + dur_ms,
-                                    text: String::from_utf8_lossy(f).into_owned(),
+                                    text: String::from_utf8_lossy(&data).into_owned(),
                                 });
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Walk one cluster's children, collecting `track_number`'s bitmap (`S_HDMV/PGS`)
+/// display sets as `(pts_ms, sup_fragment)`. Mirrors [`walk_cluster_subtitles`] but
+/// treats each block frame as binary PGS (never UTF-8) and keeps every block,
+/// including empty "clear" display sets.
+async fn walk_cluster_bitmap<M: EbmlSource + PartialEq + Clone>(
+    mut cluster: EbmlIterator<M>,
+    track_number: u64,
+    scale_ns: u64,
+    comp: Option<&Compression>,
+    cues: &mut Vec<(u64, Vec<u8>)>,
+) {
+    let to_ms = |ticks: i64| -> u64 { (ticks.max(0) as u128 * scale_ns as u128 / 1_000_000) as u64 };
+    let mut cluster_time: i64 = 0;
+    while let Some(child) = cluster.next().await {
+        match child.payload {
+            EbmlPayload::UnsignedInt(v) if child.id == ID_TIMESTAMP => cluster_time = v as i64,
+            EbmlPayload::Binary((s, e)) if child.id == ID_SIMPLEBLOCK => {
+                let bytes = cluster.read_range(s, e).await;
+                if let Some(b) = parse_block(&bytes, true, false) {
+                    if b.track_number == track_number {
+                        let pts = to_ms(cluster_time + b.rel_timecode as i64);
+                        for f in &b.frames {
+                            let Some(data) = decode_block_frame(comp, f) else { continue };
+                            cues.push((pts, build_sup_fragment(pts, &data)));
+                        }
+                    }
+                }
+            }
+            EbmlPayload::Master(mut group) if child.id == ID_BLOCKGROUP => {
+                let mut block_range = None;
+                while let Some(gf) = group.next().await {
+                    if let EbmlPayload::Binary((s, e)) = gf.payload {
+                        if gf.id == ID_BLOCK {
+                            block_range = Some((s, e));
+                        }
+                    }
+                }
+                if let Some((s, e)) = block_range {
+                    let bytes = group.read_range(s, e).await;
+                    if let Some(b) = parse_block(&bytes, false, true) {
+                        if b.track_number == track_number {
+                            let pts = to_ms(cluster_time + b.rel_timecode as i64);
+                            for f in &b.frames {
+                                let Some(data) = decode_block_frame(comp, f) else { continue };
+                                cues.push((pts, build_sup_fragment(pts, &data)));
                             }
                         }
                     }
@@ -1045,6 +1177,50 @@ fn json_escape(s: &str) -> String {
     out
 }
 
+/// Standard base64 (RFC 4648, `+/`, padded). Used to carry binary PGS `.sup`
+/// fragments over the JSON bridge to JS. All output chars are JSON-safe.
+fn base64_encode(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let n = ((chunk[0] as u32) << 16)
+            | ((*chunk.get(1).unwrap_or(&0) as u32) << 8)
+            | (*chunk.get(2).unwrap_or(&0) as u32);
+        out.push(A[((n >> 18) & 63) as usize] as char);
+        out.push(A[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { A[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { A[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+/// Reconstruct a PGS `.sup` fragment for one display set from an MKV `S_HDMV/PGS`
+/// block frame. In Matroska the display set's segments are concatenated *without*
+/// the `.sup` per-segment header (`magic + PTS + DTS`) — the presentation time
+/// comes from the block timecode. libpgs-js parses the `.sup` form, so we re-emit
+/// each `type(u8) + size(u16be) + payload` segment prefixed with a 10-byte header
+/// `0x5047 + PTS(u32be, 90kHz) + DTS(u32be=0)`, all segments sharing `pts_ms`.
+/// Truncated/garbage trailing bytes are ignored. (PTS is a 32-bit 90kHz value that
+/// wraps at ~13.25h, exactly as in real `.sup` files.)
+fn build_sup_fragment(pts_ms: u64, payload: &[u8]) -> Vec<u8> {
+    let pts90 = (pts_ms.wrapping_mul(90) & 0xFFFF_FFFF) as u32;
+    let mut out = Vec::with_capacity(payload.len() + 16);
+    let mut pos = 0;
+    while pos + 3 <= payload.len() {
+        let size = u16::from_be_bytes([payload[pos + 1], payload[pos + 2]]) as usize;
+        let seg_end = pos + 3 + size;
+        if seg_end > payload.len() {
+            break;
+        }
+        out.extend_from_slice(&[0x50, 0x47]);
+        out.extend_from_slice(&pts90.to_be_bytes());
+        out.extend_from_slice(&0u32.to_be_bytes());
+        out.extend_from_slice(&payload[pos..seg_end]);
+        pos = seg_end;
+    }
+    out
+}
+
 // ============================================================================
 // wasm-bindgen facade
 // ============================================================================
@@ -1153,6 +1329,12 @@ mod wasm {
             self.0.subtitle_events_json(track_number, start_ms, end_ms).await
         }
 
+        /// JSON list of PGS bitmap display sets for `[start_ms, end_ms)` of `track_number`
+        /// (`[{"pts":ms,"sup":"<base64 .sup fragment>"}]`), for libpgs-js rendering.
+        pub async fn subtitle_bitmap_events(&self, track_number: u64, start_ms: u64, end_ms: u64) -> String {
+            self.0.subtitle_bitmap_events_json(track_number, start_ms, end_ms).await
+        }
+
         pub fn duration_ms(&self) -> u64 {
             self.0.duration_ms()
         }
@@ -1174,4 +1356,48 @@ mod wasm {
         }
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{base64_encode, build_sup_fragment};
+
+    #[test]
+    fn base64_matches_reference() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(&[0x50, 0x47, 0x80, 0x00]), "UEeAAA==");
+    }
+
+    #[test]
+    fn sup_fragment_prefixes_each_segment_with_pts_header() {
+        // A minimal display set: a PDS-ish segment (type 0x14, size 1) and an END
+        // segment (type 0x80, size 0), concatenated MKV-style with no PG headers.
+        let payload = [0x14, 0x00, 0x01, 0xAB, 0x80, 0x00, 0x00];
+        let sup = build_sup_fragment(1000, &payload); // 1000ms → PTS 90000 (0x00015F90)
+
+        // Two segments → two 10-byte headers + the original 7 payload bytes.
+        assert_eq!(sup.len(), 2 * 10 + payload.len());
+
+        // First segment header: magic "PG", PTS=90000, DTS=0.
+        assert_eq!(&sup[0..2], &[0x50, 0x47]);
+        assert_eq!(u32::from_be_bytes([sup[2], sup[3], sup[4], sup[5]]), 90_000);
+        assert_eq!(u32::from_be_bytes([sup[6], sup[7], sup[8], sup[9]]), 0);
+        // …followed by the verbatim segment (type + size + data).
+        assert_eq!(&sup[10..14], &[0x14, 0x00, 0x01, 0xAB]);
+
+        // Second (END) segment: header again, then type 0x80, size 0.
+        assert_eq!(&sup[14..16], &[0x50, 0x47]);
+        assert_eq!(&sup[24..27], &[0x80, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn sup_fragment_ignores_truncated_trailing_bytes() {
+        // Declares size 5 but only 2 bytes follow → the segment is dropped, no panic.
+        let payload = [0x15, 0x00, 0x05, 0x01, 0x02];
+        assert!(build_sup_fragment(0, &payload).is_empty());
+    }
 }

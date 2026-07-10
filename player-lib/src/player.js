@@ -12,7 +12,12 @@ import '@videojs/html/icons/element/default';
 
 import initWasm, { MatroskaPlayer } from 'mkv-player';
 import { MseController } from './mse.js';
-import { SubtitleTrack, SubtitleRenderer } from './subtitles.js';
+import {
+  SubtitleTrack,
+  SubtitleRenderer,
+  BitmapSubtitleTrack,
+  BitmapSubtitleRenderer,
+} from './subtitles.js';
 import { TrackMenu } from './menu.js';
 import { buildControlBar } from './controlBar.js';
 
@@ -20,6 +25,11 @@ import { buildControlBar } from './controlBar.js';
 const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']);
 // ASS/SSA codecs rendered via libass (JASSUB) over a canvas overlay.
 const ASS_SUB_CODECS = new Set(['S_TEXT/ASS', 'S_TEXT/SSA']);
+// PGS (Blu-ray) bitmap subtitles rendered via libpgs over a canvas overlay. VobSub/DVBSUB
+// are also bitmap formats but libpgs can't render them, so they stay unsupported.
+const PGS_SUB_CODECS = new Set(['S_HDMV/PGS']);
+// The two canvas-overlay kinds (ASS + PGS); they share the ≤2 simultaneous-render cap.
+const CANVAS_SUB_KINDS = new Set(['ass', 'pgs']);
 
 // Royalty-free MSE mimes the transcoder may output (AAC-LC preferred, Opus fallback). Kept in
 // sync with audioTranscoder.js's OUTPUTS. Hardcoded (rather than imported) so referencing it
@@ -28,7 +38,13 @@ const ASS_SUB_CODECS = new Set(['S_TEXT/ASS', 'S_TEXT/SSA']);
 const TRANSCODE_OUT_MIMES = ['audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="opus"'];
 
 const subKind = (t) =>
-  ASS_SUB_CODECS.has(t.codec_id) ? 'ass' : TEXT_SUB_CODECS.has(t.codec_id) ? 'text' : null;
+  ASS_SUB_CODECS.has(t.codec_id)
+    ? 'ass'
+    : PGS_SUB_CODECS.has(t.codec_id)
+      ? 'pgs'
+      : TEXT_SUB_CODECS.has(t.codec_id)
+        ? 'text'
+        : null;
 
 // Init the WASM module once per page, no matter how many players exist.
 let wasmReady = null;
@@ -94,18 +110,19 @@ export class MkvPlayer {
 
     // --- per-session state ---
     this.activePlayer = null;
-    // Subtitles: a cue cache per ASS track (fed continuously from load), plus a JASSUB
-    // renderer per *displayed* track (≤2). Fonts are shared across renderers.
-    this.subTracks = new Map(); // track number → SubtitleTrack (cue cache)
-    this.subRenderers = new Map(); // track number → SubtitleRenderer (only while displayed)
-    this.subFonts = []; // Uint8Array[] font attachments, shared by all renderers
-    this.activeSubNumbers = new Set(); // ASS track numbers currently rendered
+    // Subtitles: a cue cache per canvas-rendered track (ASS or PGS; fed continuously from
+    // load), plus a renderer per *displayed* track (≤2 total, any mix). Fonts (ASS only)
+    // are shared across renderers.
+    this.subTracks = new Map(); // track number → SubtitleTrack | BitmapSubtitleTrack (cue cache)
+    this.subRenderers = new Map(); // track number → SubtitleRenderer | BitmapSubtitleRenderer (while displayed)
+    this.subFonts = []; // Uint8Array[] font attachments, shared by all ASS renderers
+    this.activeSubNumbers = new Set(); // canvas-rendered (ASS/PGS) track numbers currently shown
     this.trackList = [];
     this.chapterList = [];
     this.userChoseSub = false;
     this.loadedSubs = new Map(); // track number → HTMLTrackElement (text path)
     this.subtitleInfo = new Map(); // track number → { language, name }
-    this.subKindByNumber = new Map(); // track number → 'ass' | 'text'
+    this.subKindByNumber = new Map(); // track number → 'ass' | 'pgs' | 'text'
     this.controller = null;
     this.transcoder = null;
     this.subtitleObjectUrls = [];
@@ -270,9 +287,10 @@ export class MkvPlayer {
     this._buildChapterMenu(defaultAudio ? defaultAudio.language : null);
     this._buildChapterMarkers(durationMs);
 
-    // ASS tracks render via libass; a cue cache is built for each and fed continuously so
-    // any track can be shown instantly (dual subs allowed, max two). Plain-text subs are
-    // listed but disabled (the WebVTT path is not wired into the libass overlay yet).
+    // ASS (libass) and PGS (libpgs) tracks render over a canvas overlay; a cue cache is
+    // built for each and fed continuously so any track can be shown instantly (dual subs
+    // allowed, max two). Plain-text subs are listed but disabled (the WebVTT path is not
+    // wired into the overlay), as are bitmap formats libpgs can't render (VobSub/DVBSUB).
     const subItems = [{ value: '', label: 'Off' }];
     for (const t of subtitleTracks) {
       this.subtitleInfo.set(t.number, { language: t.language, name: t.name });
@@ -281,14 +299,18 @@ export class MkvPlayer {
       if (kind === 'ass') {
         const header = player.subtitle_header(BigInt(t.number));
         this.subTracks.set(t.number, new SubtitleTrack(header));
+      } else if (kind === 'pgs') {
+        this.subTracks.set(t.number, new BitmapSubtitleTrack());
       }
-      const tag =
-        kind === 'ass' ? (t.forced ? ' [forced]' : '') : ` [${t.codec_id} — unsupported]`;
+      const renderable = CANVAS_SUB_KINDS.has(kind);
+      const tag = renderable
+        ? (kind === 'pgs' ? ' [PGS]' : '') + (t.forced ? ' [forced]' : '')
+        : ` [${t.codec_id} — unsupported]`;
       subItems.push({
         value: String(t.number),
         label: `${t.language || '??'}${t.name ? ' — ' + t.name : ''}${tag}`,
-        disabled: kind !== 'ass', // only ASS is wired up for now
-        addable: kind === 'ass', // dual-sub add button
+        disabled: !renderable, // ASS + PGS are wired up
+        addable: renderable, // dual-sub add button
       });
     }
     if (this.subsMenu) {
@@ -309,10 +331,15 @@ export class MkvPlayer {
     }
     await this.controller.start(videoTrack, defaultAudio);
 
-    // Stream cues for every ASS track from the start (caches fill as playback progresses),
-    // so enabling a track later is instant and never drops the line already on screen.
+    // Stream cues for every canvas-rendered track (ASS + PGS) from the start (caches fill as
+    // playback progresses), so enabling a track later is instant and never drops the line
+    // already on screen. PGS caches take the binary (subtitle_bitmap_events) feed path.
     this.controller.setSubtitleSinks(
-      [...this.subTracks.entries()].map(([trackNumber, sink]) => ({ trackNumber, sink }))
+      [...this.subTracks.entries()].map(([trackNumber, sink]) => ({
+        trackNumber,
+        sink,
+        binary: this.subKindByNumber.get(trackNumber) === 'pgs',
+      }))
     );
 
     // Fonts download out-of-band (separate connections) so they don't disturb the single
@@ -356,23 +383,25 @@ export class MkvPlayer {
   }
 
   // Reconcile the set of active subtitle tracks against `values` (array of track-number
-  // strings; [] = off). ASS tracks render via libass (up to two at once, each its own
-  // overlay), seeded instantly from their always-filling cue cache. A text track uses the
-  // native <track> path (single).
+  // strings; [] = off). ASS (libass) and PGS (libpgs) tracks render over canvas overlays,
+  // up to two at once in any mix, seeded instantly from their always-filling cue cache. A
+  // text track uses the native <track> path (single).
   async _selectSubtitle(values) {
     if (!this.activePlayer) return;
     const nums = (Array.isArray(values) ? values : values ? [values] : [])
       .map(Number)
       .filter((n) => !Number.isNaN(n));
-    const wantAss = new Set(nums.filter((n) => this.subKindByNumber.get(n) === 'ass'));
+    const wantCanvas = new Set(
+      nums.filter((n) => CANVAS_SUB_KINDS.has(this.subKindByNumber.get(n)))
+    );
     const textNum = nums.find((n) => this.subKindByNumber.get(n) === 'text');
 
-    // ASS: drop renderers no longer wanted, add ones newly wanted (cache already primed).
+    // Canvas overlays (ASS/PGS): drop renderers no longer wanted, add newly wanted (cache primed).
     for (const n of [...this.activeSubNumbers]) {
-      if (!wantAss.has(n)) this._disableAssRenderer(n);
+      if (!wantCanvas.has(n)) this._disableCanvasRenderer(n);
     }
-    for (const n of wantAss) {
-      if (!this.activeSubNumbers.has(n)) this._enableAssRenderer(n);
+    for (const n of wantCanvas) {
+      if (!this.activeSubNumbers.has(n)) this._enableCanvasRenderer(n);
     }
 
     // Text (native <track>): single at a time.
@@ -384,19 +413,25 @@ export class MkvPlayer {
     }
   }
 
-  // Create a JASSUB overlay for ASS track `number` and seed it from the cache immediately.
-  _enableAssRenderer(number) {
+  // Create a canvas overlay for ASS/PGS track `number` and seed it from the cache instantly.
+  // ASS → JASSUB (buildDoc string); PGS → libpgs (buildBuffer ArrayBuffer). Both caches share
+  // the `onChange`/build contract, so the wiring differs only in the renderer and build call.
+  _enableCanvasRenderer(number) {
     const cache = this.subTracks.get(number);
     if (!cache || this.subRenderers.has(number)) return;
-    const renderer = new SubtitleRenderer(this.video, this.subFonts);
+    const isPgs = this.subKindByNumber.get(number) === 'pgs';
+    const renderer = isPgs
+      ? new BitmapSubtitleRenderer(this.video)
+      : new SubtitleRenderer(this.video, this.subFonts);
+    const build = isPgs ? () => cache.buildBuffer() : () => cache.buildDoc();
     this.subRenderers.set(number, renderer);
     this.activeSubNumbers.add(number);
     // Push later cue batches into this renderer (debounced) while it stays displayed.
-    cache.onChange = () => renderer.update(cache.buildDoc());
-    renderer.show(cache.buildDoc()).catch((e) => console.warn('subtitle render failed', e));
+    cache.onChange = () => renderer.update(build());
+    Promise.resolve(renderer.show(build())).catch((e) => console.warn('subtitle render failed', e));
   }
 
-  _disableAssRenderer(number) {
+  _disableCanvasRenderer(number) {
     const cache = this.subTracks.get(number);
     if (cache) cache.onChange = null;
     const renderer = this.subRenderers.get(number);

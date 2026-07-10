@@ -22,6 +22,14 @@
 // Vite handle that (jassub is in optimizeDeps.exclude) rather than passing workerUrl/wasmUrl.
 import JASSUB from 'jassub';
 
+// Bitmap subtitles (PGS / S_HDMV/PGS) are rendered by libpgs. Same split as ASS:
+// BitmapSubtitleTrack is the growing `.sup` cue cache (fed continuously per track),
+// BitmapSubtitleRenderer wraps a libpgs PgsRenderer over a canvas overlay for a
+// displayed track. See the end of this file. libpgs is a plain ESM module rendered
+// on the main thread (mode below), so — unlike jassub — it needs no worker/wasm
+// plumbing and bundles normally.
+import { PgsRenderer } from 'libpgs';
+
 const DEFAULT_HEADER =
   '[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n' +
   '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n' +
@@ -125,7 +133,7 @@ export class SubtitleRenderer {
   constructor(video, fonts = []) {
     this.video = video;
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'jassub-overlay'; // JASSUB sets size/position; CSS sets the rest
+    this.canvas.className = 'subtitle-overlay'; // JASSUB sets size/position; CSS sets the rest
     this.canvas.style.display = 'none';
     video.insertAdjacentElement('afterend', this.canvas);
     this.instance = null;
@@ -205,5 +213,122 @@ export class SubtitleRenderer {
     this.canvas = null;
     this.doc = null;
     this.fonts = [];
+  }
+}
+
+/** base64 (as delivered by subtitle_bitmap_events) → Uint8Array. */
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * The `.sup` cue cache for a single PGS (bitmap) subtitle track — the bitmap analogue of
+ * {@link SubtitleTrack}. Fed continuously by a SubtitleFeeder (mse.js): each event is one
+ * PGS display set, already reconstructed into a `.sup` fragment by the WASM core and
+ * base64-encoded. We keep them keyed by presentation timestamp (the stable dedup key across
+ * re-fetched/overlapping windows) and concatenate them, ascending, into the growing `.sup`
+ * buffer handed to libpgs. Notifies `onChange` when new display sets land.
+ */
+export class BitmapSubtitleTrack {
+  constructor() {
+    this.events = new Map(); // pts (ms) → Uint8Array (.sup fragment)
+    this.onChange = null; // set by the manager while this track is displayed
+  }
+
+  /** Merge a batch of `{pts, sup}` display sets (from subtitle_bitmap_events). */
+  addEvents(cues) {
+    if (!Array.isArray(cues) || cues.length === 0) return;
+    let added = 0;
+    for (const c of cues) {
+      if (this.events.has(c.pts)) continue;
+      this.events.set(c.pts, b64ToBytes(c.sup));
+      added++;
+    }
+    if (added && this.onChange) this.onChange();
+  }
+
+  /** The whole `.sup` bitstream so far (fragments concatenated in ascending-pts order). */
+  buildBuffer() {
+    const keys = [...this.events.keys()].sort((a, b) => a - b);
+    let total = 0;
+    for (const k of keys) total += this.events.get(k).length;
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const k of keys) {
+      const frag = this.events.get(k);
+      out.set(frag, off);
+      off += frag.length;
+    }
+    return out.buffer;
+  }
+}
+
+/**
+ * One libpgs {@link PgsRenderer} rendering one displayed PGS track over its own canvas
+ * overlay — the bitmap analogue of {@link SubtitleRenderer}. libpgs syncs to the <video>'s
+ * timeupdate itself and re-renders on load (`onTimestampsUpdated`), so we only feed it the
+ * `.sup` buffer: `show()` seeds it instantly from the cache, `update()` re-feeds (debounced)
+ * as more display sets stream in. Runs on the main thread (no worker/wasm to bundle) — PGS
+ * updates are infrequent, so decode cost is negligible.
+ */
+export class BitmapSubtitleRenderer {
+  /** @param video HTMLVideoElement (libpgs reads currentTime and listens for timeupdate). */
+  constructor(video) {
+    this.video = video;
+    // Our own canvas (not libpgs's auto-created one) so it mounts right after the <video>,
+    // stacking under media-controls exactly like the JASSUB overlay. libpgs won't touch its
+    // position/DOM when we pass it in; the CSS class letterboxes it over the video.
+    this.canvas = document.createElement('canvas');
+    this.canvas.className = 'subtitle-overlay subtitle-overlay--pgs';
+    this.canvas.style.display = 'none';
+    video.insertAdjacentElement('afterend', this.canvas);
+    this.instance = null;
+    this.buffer = null; // most recent `.sup` ArrayBuffer handed to show/update
+    this.rebuildTimer = null;
+  }
+
+  ensureInstance() {
+    if (this.instance) return;
+    this.instance = new PgsRenderer({
+      video: this.video,
+      canvas: this.canvas,
+      mode: 'mainThread',
+      aspectRatio: 'contain', // matches the video's object-fit; letterboxes the composition
+    });
+  }
+
+  /** Start rendering `buffer` (a full `.sup` bitstream) immediately. */
+  show(buffer) {
+    this.buffer = buffer;
+    this.ensureInstance();
+    if (this.canvas) this.canvas.style.display = '';
+    if (buffer && buffer.byteLength) this.instance.loadFromBuffer(buffer);
+  }
+
+  /** Re-feed a grown `.sup` buffer, debounced (display sets trickle in as playback streams). */
+  update(buffer) {
+    this.buffer = buffer;
+    if (this.rebuildTimer || !this.instance) return;
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      if (this.buffer && this.buffer.byteLength) this.instance.loadFromBuffer(this.buffer);
+    }, REBUILD_DEBOUNCE_MS);
+  }
+
+  destroy() {
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = null;
+    if (this.instance) {
+      try {
+        this.instance.dispose(); // detaches the timeupdate listener; leaves our canvas (external)
+      } catch (_) {}
+      this.instance = null;
+    }
+    if (this.canvas) this.canvas.remove();
+    this.canvas = null;
+    this.buffer = null;
   }
 }

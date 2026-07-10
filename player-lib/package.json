@@ -16,12 +16,13 @@
   "scripts": {
     "build:ffmpeg": "bash ffmpeg-core/build.sh",
     "setup-ffmpeg": "node scripts/setup-ffmpeg-core.mjs",
-    "test": "node --test src/mse.test.js"
+    "test": "node --test src/mse.test.js src/subtitles.test.js"
   },
   "dependencies": {
     "@videojs/html": "^10.0.0-beta.24",
     "mkv-player": "file:../mkv-player/pkg",
-    "jassub": "^2.5.6"
+    "jassub": "^2.5.6",
+    "libpgs": "^0.8.1"
   },
   "optionalDependencies": {
     "@ffmpeg/ffmpeg": "^0.12.10",

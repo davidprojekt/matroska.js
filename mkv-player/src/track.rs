@@ -5,10 +5,42 @@
 use ebml_wasm::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
 use ebml_wasm::matroska_data::{
     ID_AUDIO, ID_BITDEPTH, ID_CHANNELS, ID_CODECDELAY, ID_CODECID, ID_CODECNAME, ID_CODECPRIVATE,
-    ID_DEFAULTDURATION, ID_DISPLAYHEIGHT, ID_DISPLAYWIDTH, ID_FLAGDEFAULT, ID_FLAGFORCED,
-    ID_LANGUAGE, ID_LANGUAGEBCP47, ID_NAME, ID_PIXELHEIGHT, ID_PIXELWIDTH, ID_SAMPLINGFREQUENCY,
-    ID_SEEKPREROLL, ID_TRACKENTRY, ID_TRACKNUMBER, ID_TRACKTYPE, ID_TRACKUID, ID_VIDEO,
+    ID_CONTENTCOMPALGO, ID_CONTENTCOMPRESSION, ID_CONTENTCOMPSETTINGS, ID_CONTENTENCODING,
+    ID_CONTENTENCODINGS, ID_DEFAULTDURATION, ID_DISPLAYHEIGHT, ID_DISPLAYWIDTH, ID_FLAGDEFAULT,
+    ID_FLAGFORCED, ID_LANGUAGE, ID_LANGUAGEBCP47, ID_NAME, ID_PIXELHEIGHT, ID_PIXELWIDTH,
+    ID_SAMPLINGFREQUENCY, ID_SEEKPREROLL, ID_TRACKENTRY, ID_TRACKNUMBER, ID_TRACKTYPE, ID_TRACKUID,
+    ID_VIDEO,
 };
+
+/// A track's `ContentCompression` (`\...\ContentEncodings\ContentEncoding\ContentCompression`).
+/// Matroska subtitle tracks are commonly zlib-compressed per block by mkvmerge; block payloads
+/// must be decompressed before use. See [`decode_block_frame`].
+#[derive(Debug, Clone)]
+pub struct Compression {
+    /// `ContentCompAlgo`: 0 = zlib, 1 = bzlib, 2 = lzo1x, 3 = header-strip.
+    pub algo: u64,
+    /// `ContentCompSettings`: for header-strip (algo 3), the bytes stripped from each frame.
+    pub settings: Option<Vec<u8>>,
+}
+
+/// Decompress one block frame per a track's `ContentCompression`, or return it unchanged when
+/// the track isn't compressed. Returns `None` for an unsupported algorithm or corrupt data
+/// (caller drops the frame). Handles the two algorithms seen in the wild for subtitles: zlib
+/// (0) and header-strip (3); bzlib/lzo1x (1/2) are unsupported.
+pub fn decode_block_frame(comp: Option<&Compression>, frame: &[u8]) -> Option<Vec<u8>> {
+    match comp {
+        None => Some(frame.to_vec()),
+        Some(c) => match c.algo {
+            0 => miniz_oxide::inflate::decompress_to_vec_zlib(frame).ok(),
+            3 => {
+                let mut out = c.settings.clone().unwrap_or_default();
+                out.extend_from_slice(frame);
+                Some(out)
+            }
+            _ => None,
+        },
+    }
+}
 
 /// Matroska `TrackType` values (`\Segment\Tracks\TrackEntry\TrackType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +117,9 @@ pub struct TrackData {
     /// `CodecDelay` / `SeekPreroll` in nanoseconds (Opus).
     pub codec_delay: Option<u64>,
     pub seek_preroll: Option<u64>,
+
+    /// Per-block content compression, if any (subtitle tracks are often zlib-compressed).
+    pub compression: Option<Compression>,
 }
 
 impl TrackData {
@@ -362,11 +397,47 @@ where
             EbmlPayload::Master(sub) if field.id == ID_AUDIO => {
                 parse_audio(sub, &mut track).await;
             }
+            EbmlPayload::Master(sub) if field.id == ID_CONTENTENCODINGS => {
+                track.compression = parse_content_encodings(sub).await;
+            }
             _ => {}
         }
     }
 
     track
+}
+
+/// Parse `ContentEncodings` for the first `ContentCompression` (block-scope compression).
+/// Encryption and multi-encoding stacks aren't supported — we take the first compression.
+async fn parse_content_encodings<S>(mut encodings: EbmlIterator<S>) -> Option<Compression>
+where
+    S: EbmlSource + PartialEq + Clone,
+{
+    while let Some(enc) = encodings.next().await {
+        let EbmlPayload::Master(mut encoding) = enc.payload else { continue };
+        if enc.id != ID_CONTENTENCODING {
+            continue;
+        }
+        while let Some(field) = encoding.next().await {
+            let EbmlPayload::Master(mut comp) = field.payload else { continue };
+            if field.id != ID_CONTENTCOMPRESSION {
+                continue;
+            }
+            let mut algo = 0u64; // Matroska default ContentCompAlgo is 0 (zlib)
+            let mut settings = None;
+            while let Some(cf) = comp.next().await {
+                match cf.payload {
+                    EbmlPayload::UnsignedInt(v) if cf.id == ID_CONTENTCOMPALGO => algo = v,
+                    EbmlPayload::Binary((s, e)) if cf.id == ID_CONTENTCOMPSETTINGS => {
+                        settings = Some(comp.read_range(s, e).await.into_vec());
+                    }
+                    _ => {}
+                }
+            }
+            return Some(Compression { algo, settings });
+        }
+    }
+    None
 }
 
 async fn parse_video<S>(mut video: EbmlIterator<S>, track: &mut TrackData)
@@ -402,5 +473,43 @@ where
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_block_frame, Compression};
+
+    #[test]
+    fn no_compression_returns_frame_unchanged() {
+        let frame = b"Dialogue: raw text";
+        assert_eq!(decode_block_frame(None, frame).unwrap(), frame);
+    }
+
+    #[test]
+    fn zlib_frame_is_inflated() {
+        let original = b"\x16\x00\x03\x01\x02\x03\x80\x00\x00"; // a fake PGS-ish payload
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(original, 6);
+        assert_ne!(&compressed[..], &original[..], "precondition: actually compressed");
+        let comp = Compression { algo: 0, settings: None };
+        assert_eq!(decode_block_frame(Some(&comp), &compressed).unwrap(), original);
+    }
+
+    #[test]
+    fn corrupt_zlib_frame_is_dropped() {
+        let comp = Compression { algo: 0, settings: None };
+        assert_eq!(decode_block_frame(Some(&comp), b"not zlib data"), None);
+    }
+
+    #[test]
+    fn header_strip_prepends_settings() {
+        let comp = Compression { algo: 3, settings: Some(vec![0xAA, 0xBB]) };
+        assert_eq!(decode_block_frame(Some(&comp), b"\x01\x02").unwrap(), vec![0xAA, 0xBB, 0x01, 0x02]);
+    }
+
+    #[test]
+    fn unsupported_algo_is_dropped() {
+        let comp = Compression { algo: 1, settings: None }; // bzlib — unsupported
+        assert_eq!(decode_block_frame(Some(&comp), b"x"), None);
     }
 }

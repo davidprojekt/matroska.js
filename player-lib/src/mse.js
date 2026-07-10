@@ -207,18 +207,23 @@ class TranscodingTrackFeeder {
 }
 
 /**
- * Feeds streamed subtitle cues for one ASS track, tiled on the same `boundaries` as
+ * Feeds streamed subtitle cues for one subtitle track, tiled on the same `boundaries` as
  * video/audio. Each window's cues come from clusters the video pass has usually already
- * fetched (cache hits), so this rides along the existing single forward stream. Events
- * persist in the track's SubtitleTrack cache, so backward seeks need no re-feed; forward
- * seeks re-tile. One feeder runs per ASS track for the whole session.
+ * fetched (cache hits), so this rides along the existing single forward stream. Cues
+ * persist in the track's cue cache, so backward seeks need no re-feed; forward seeks
+ * re-tile. One feeder runs per subtitle track for the whole session.
+ *
+ * Handles both cue kinds: ASS text (`subtitle_events` → SubtitleTrack) and PGS bitmap
+ * (`subtitle_bitmap_events` → BitmapSubtitleTrack). Only the WASM method called differs;
+ * the sink's `addEvents` absorbs whichever JSON shape comes back.
  */
 class SubtitleFeeder {
-  constructor(player, trackNumber, boundaries, sink) {
+  constructor(player, trackNumber, boundaries, sink, binary = false) {
     this.player = player;
     this.trackNumber = trackNumber;
     this.boundaries = boundaries;
-    this.sink = sink; // SubtitleTrack (cue cache)
+    this.sink = sink; // SubtitleTrack | BitmapSubtitleTrack (cue cache)
+    this.binary = binary; // true → PGS bitmap track (subtitle_bitmap_events)
     this.index = 0;
     this.busy = false;
     this.done = false;
@@ -255,7 +260,9 @@ class SubtitleFeeder {
     const end = this.boundaries[this.index + 1];
     this.index += 1;
     try {
-      const json = await this.player.subtitle_events(BIG(this.trackNumber), BIG(start), BIG(end));
+      const json = this.binary
+        ? await this.player.subtitle_bitmap_events(BIG(this.trackNumber), BIG(start), BIG(end))
+        : await this.player.subtitle_events(BIG(this.trackNumber), BIG(start), BIG(end));
       if (gen === this.generation && json) this.sink.addEvents(JSON.parse(json));
     } catch (e) {
       console.error('subtitle_events failed', e);
@@ -520,15 +527,15 @@ export class MseController {
   }
 
   /**
-   * Register the cue caches to stream into — one entry `{ trackNumber, sink }` per ASS
-   * track (sink is its SubtitleTrack). Feeders run for every track from now on so any
-   * track can be displayed instantly from its cache; which tracks actually render is the
-   * player's concern, not ours.
+   * Register the cue caches to stream into — one entry `{ trackNumber, sink, binary? }` per
+   * subtitle track (sink is its SubtitleTrack or BitmapSubtitleTrack; `binary: true` for PGS).
+   * Feeders run for every track from now on so any track can be displayed instantly from its
+   * cache; which tracks actually render is the player's concern, not ours.
    */
   setSubtitleSinks(entries) {
     const t = this.video.currentTime * 1000;
-    this.subFeeders = entries.map(({ trackNumber, sink }) => {
-      const feeder = new SubtitleFeeder(this.player, trackNumber, this.boundaries, sink);
+    this.subFeeders = entries.map(({ trackNumber, sink, binary }) => {
+      const feeder = new SubtitleFeeder(this.player, trackNumber, this.boundaries, sink, !!binary);
       feeder.seekTo(t);
       return feeder;
     });
