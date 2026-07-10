@@ -9,3 +9,5 @@
 # Staged deployable app for the dev container (scripts/assemble.sh).
 /deploy
 *.tsbuildinfo
+# Ed25519 license test keys (secret seed). Never commit.
+/dev/license-test-keys.txt

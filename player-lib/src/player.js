@@ -87,10 +87,17 @@ export class MkvPlayer {
     // filename (see _load).
     this._title = opts.title ?? null;
 
+    // Optional bottom-right watermark: a string (shorthand for { text }) or { text, image, href }.
+    // Falsy means no watermark. The element is built only when configured (see buildControlBar);
+    // _setWatermark fills its content below.
+    this._watermark =
+      typeof opts.watermark === 'string' ? { text: opts.watermark } : opts.watermark ?? null;
+
     // --- build the control bar and capture element references ---
-    const refs = buildControlBar(container, opts.controls);
+    const refs = buildControlBar(container, opts.controls, this._watermark);
     this.refs = refs;
     this.video = refs.video;
+    this._setWatermark();
 
     // Track menus live in the control bar; each exists only if that control is enabled.
     this.audioMenu = refs.audioTrigger
@@ -182,6 +189,41 @@ export class MkvPlayer {
     const text = title || '';
     el.textContent = text;
     el.hidden = !text;
+  }
+
+  // Populate the watermark from `this._watermark` ({ text, image, href }) and reveal it. An
+  // `image` renders as an <img> (logo); otherwise `text` renders as plain text. When `href` is
+  // given the content is wrapped in a link (made clickable via CSS pointer-events). Called once
+  // from the constructor; the element only exists when a watermark was configured.
+  _setWatermark() {
+    const el = this.refs.watermark;
+    const wm = this._watermark;
+    if (!el || !wm) return;
+
+    let content;
+    if (wm.image) {
+      const img = document.createElement('img');
+      img.src = wm.image;
+      img.alt = wm.text || '';
+      content = img;
+    } else if (wm.text) {
+      content = document.createTextNode(wm.text);
+    } else {
+      return; // nothing to show
+    }
+
+    if (wm.href) {
+      const a = document.createElement('a');
+      a.href = wm.href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.appendChild(content);
+      el.classList.add('mkv-watermark--link');
+      el.appendChild(a);
+    } else {
+      el.appendChild(content);
+    }
+    el.hidden = false;
   }
 
   async _preflight(url) {

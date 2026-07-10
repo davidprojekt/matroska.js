@@ -20,6 +20,7 @@ ffmpeg core is bundled; an administrator configures the core/wasm URLs in the ad
         <nextcloud min-version="28" max-version="34"/>
     </dependencies>
     <settings>
+        <admin>OCA\MkvPlayer\Settings\LicenseAdminSettings</admin>
         <admin-section>OCA\MkvPlayer\Settings\AdminSection</admin-section>
     </settings>
 </info>

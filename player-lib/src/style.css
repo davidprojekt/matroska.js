@@ -166,6 +166,50 @@ video-player:has(.media-default-skin--dock-below:not(:fullscreen)) {
 .mkv-title-bar[hidden] { display: none; }
 .media-default-skin--video:has(.media-controls[data-visible]) .mkv-title-bar { opacity: 1; }
 
+/* Bottom-right watermark. Always visible while shown, but it fades and lifts by keying off the
+   skin's own `.media-controls[data-visible]` state — the same pure-CSS mechanism the title bar
+   uses, so no JS runs per frame. At rest (UI hidden) it's faint and hugs the bottom edge; when
+   the controls appear it becomes near-opaque and rises above the control bar. z-index 15 sits
+   above the subtitle/scrim layer (5) but below the dropdown menus (30). */
+.mkv-watermark {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 15;
+  pointer-events: none;
+  opacity: 0.35;
+  color: var(--media-color-primary, oklch(1 0 0));
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  transition:
+    opacity var(--media-controls-transition-duration, 200ms)
+      var(--media-controls-transition-timing-function, ease-out),
+    bottom var(--media-controls-transition-duration, 200ms)
+      var(--media-controls-transition-timing-function, ease-out);
+}
+.mkv-watermark[hidden] { display: none; }
+.mkv-watermark img { display: block; height: 1.5rem; width: auto; }
+/* A linked watermark is clickable (the base element stays click-through). */
+.mkv-watermark.mkv-watermark--link { pointer-events: auto; }
+.mkv-watermark a { color: inherit; text-decoration: none; }
+
+/* UI visible (overlay + fullscreen): more opaque and lifted clear of the control bar. The 4rem
+   offset clears the flush bottom bar (windowed) and the floating pill (fullscreen); tune if the
+   bar height changes. */
+.media-default-skin--video:has(.media-controls[data-visible]) .mkv-watermark {
+  opacity: 0.9;
+  bottom: 4rem;
+}
+/* Docked windowed: the bar sits BELOW the video, so the watermark never overlaps it — keep it low
+   and just raise the resting opacity (the controls are always present here). */
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen) .mkv-watermark,
+.media-default-skin--video.media-default-skin--dock-below:not(:fullscreen):has(.media-controls[data-visible]) .mkv-watermark {
+  bottom: 0.75rem;
+  opacity: 0.9;
+}
+
 /* Custom Audio/Subtitle/Chapter dropdown menus in the control bar. */
 .vjs-menu { position: relative; display: inline-flex; align-items: center; }
 .vjs-menu__trigger { font-size: 0.8125rem; padding: 0 0.6rem; min-width: auto; }

@@ -45,6 +45,10 @@ const overrides = defineConfig({
 export default createAppConfig(
   {
     main: fileURLToPath(new URL('src/main.js', import.meta.url)),
+    // Standalone Vue 3 app for the admin settings page (license key + buy link). Emitted as
+    // js/mkvplayer-admin-settings.mjs. It only loads on the admin settings page, isolated from
+    // the Vue-2 Viewer handler in `main`, so bundling a Vue 3 runtime here causes no conflict.
+    'admin-settings': fileURLToPath(new URL('src/admin-settings.js', import.meta.url)),
   },
   {
     config: overrides,

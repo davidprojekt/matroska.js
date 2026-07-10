@@ -20,11 +20,13 @@ class ConfigService {
 	public const KEY_EXTERNAL = 'ffmpeg_external';
 	public const KEY_CORE_URL = 'ffmpeg_core_url';
 	public const KEY_WASM_URL = 'ffmpeg_wasm_url';
+	public const KEY_LICENSE = 'license_key';
 
 	public const DEFAULT_TRANSCODE = true;
 
 	public function __construct(
 		private IAppConfig $appConfig,
+		private LicenseService $license,
 	) {
 	}
 
@@ -49,6 +51,15 @@ class ConfigService {
 		return $this->appConfig->getAppValueString(self::KEY_WASM_URL, '');
 	}
 
+	/** The stored license key (admin-only; never shipped to the frontend). */
+	public function getLicenseKey(): string {
+		return $this->appConfig->getAppValueString(self::KEY_LICENSE, '');
+	}
+
+	public function setLicenseKey(string $key): void {
+		$this->appConfig->setAppValueString(self::KEY_LICENSE, trim($key));
+	}
+
 	/** External core/wasm URLs, but only when the external opt-in is on and both are set. */
 	public function getExternalUrls(): ?array {
 		if (!$this->isExternal()) {
@@ -66,13 +77,17 @@ class ConfigService {
 	 * The shape consumed by the frontend (the Viewer component), via initial state. When `external`
 	 * is null the frontend uses the bundled same-origin core (URL built client-side).
 	 *
-	 * @return array{transcodeEnabled: bool, debug: bool, external: ?array{coreURL: string, wasmURL: string}}
+	 * `licensed` is the validated result of the admin's license key (the raw key is never exposed
+	 * here); the frontend uses it to hide the watermark for licensed instances.
+	 *
+	 * @return array{transcodeEnabled: bool, debug: bool, external: ?array{coreURL: string, wasmURL: string}, licensed: bool}
 	 */
 	public function getFrontendConfig(): array {
 		return [
 			'transcodeEnabled' => $this->isTranscodeEnabled(),
 			'debug' => $this->isDebugEnabled(),
 			'external' => $this->getExternalUrls(),
+			'licensed' => $this->license->isLicensed(),
 		];
 	}
 }

@@ -92,7 +92,7 @@ export default {
 					return
 				}
 
-				this.player = createPlayer(this.$refs.stage, {
+				const playerOpts = {
 					controls: 'full',
 					// Transcoding uses the bundled same-origin core by default (or the admin's
 					// external URLs when opted in); resolveFfmpeg() picks between them.
@@ -112,7 +112,16 @@ export default {
 						this.statusMessage = 'Error: ' + err.message
 						this.$emit('error', err)
 					},
-				})
+				}
+
+				// Watermark for unlicensed instances only. `cfg.licensed` is the server-validated
+				// result of the admin's license key (the key itself is never sent here). Text is the
+				// default; swap to `{ image: generateFilePath('mkvplayer','','img/<file>') }` for a logo.
+				if (!cfg.licensed) {
+					playerOpts.watermark = { text: 'MKV Player' }
+				}
+
+				this.player = createPlayer(this.$refs.stage, playerOpts)
 
 				// The Viewer hands us `source`: a same-origin URL to the file, so the player's
 				// ranged fetch is authenticated by the session cookie (see resolveSource).

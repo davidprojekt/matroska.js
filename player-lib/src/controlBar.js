@@ -153,12 +153,15 @@ const gesturesFrag = () => `
 
 /**
  * Build the player DOM into `container`, keeping only the controls in `controlsConfig`.
- * Returns `{ video, titleBar, audioTrigger, audioMenu, subsTrigger, subsMenu, chaptersTrigger,
- * chaptersMenu, prevChapter, nextChapter, chapterMarkers }`; entries for disabled controls
- * are `null`. The `<video>` always stays nested in `<media-container>` so the JASSUB
- * subtitle overlay (inserted after the video) positions correctly even with no controls.
+ * Returns `{ video, titleBar, watermark, audioTrigger, audioMenu, subsTrigger, subsMenu,
+ * chaptersTrigger, chaptersMenu, prevChapter, nextChapter, chapterMarkers }`; entries for
+ * disabled controls are `null`. The `<video>` always stays nested in `<media-container>` so
+ * the JASSUB subtitle overlay (inserted after the video) positions correctly even with no
+ * controls. When `watermarkConfig` is truthy a bottom-right `.mkv-watermark` element is added
+ * (populated by the orchestrator); it lives alongside the title bar so it shares the video's
+ * containing block in both layout modes (see style.css).
  */
-export function buildControlBar(container, controlsConfig) {
+export function buildControlBar(container, controlsConfig, watermarkConfig) {
   const flags = resolveControls(controlsConfig);
   const uid = `mp${++seq}`;
 
@@ -205,6 +208,13 @@ export function buildControlBar(container, controlsConfig) {
     ? `<div class="mkv-title-bar" data-ref="titleBar" hidden></div>`
     : '';
 
+  // Bottom-right watermark. Always visible while shown, but its opacity/position react to the
+  // control-bar visibility purely in CSS (see style.css) — no per-frame JS. Content is filled in
+  // by the orchestrator (_setWatermark), so it starts hidden until then.
+  const watermarkMarkup = watermarkConfig
+    ? `<div class="mkv-watermark" data-ref="watermark" hidden></div>`
+    : '';
+
   // `dock: 'below'` renders the bar *under* the video instead of overlaying it (see style.css).
   // The container gets a mode class and, in docked mode, the video + its overlays are wrapped in
   // an `.mkv-stage` so they position over the picture only while the bar flows beneath it.
@@ -234,6 +244,7 @@ export function buildControlBar(container, controlsConfig) {
       ? `<div class="mkv-stage">
           ${videoEl}
           ${titleBarMarkup}
+          ${watermarkMarkup}
           ${bufferingEl}
           ${overlayEl}
           ${gesturesEl}
@@ -242,6 +253,7 @@ export function buildControlBar(container, controlsConfig) {
         ${hotkeysEl}`
       : `${videoEl}
         ${titleBarMarkup}
+        ${watermarkMarkup}
         ${bufferingEl}
         ${controlsMarkup}
         ${overlayEl}
@@ -259,6 +271,7 @@ export function buildControlBar(container, controlsConfig) {
   return {
     video: q('video'),
     titleBar: q('titleBar'),
+    watermark: q('watermark'),
     audioTrigger: q('audioTrigger'),
     audioMenu: q('audioMenu'),
     subsTrigger: q('subsTrigger'),
