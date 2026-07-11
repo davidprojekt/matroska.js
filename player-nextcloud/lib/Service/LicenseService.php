@@ -30,13 +30,13 @@ class LicenseService {
 	 * private seed lives in dev/license-test-keys.txt (gitignored) and is used by
 	 * scripts/sign-license.php to mint test keys.
 	 */
-	public const PUBLIC_KEY_HEX = '86ea4216708ab2d5b25d64221baeaeea46dd3d1d576f11bcbfbcfb1381352e1a';
+	public const PUBLIC_KEY_HEX = '535f9230fd3c5c2a0ff386b699c421657b3a3225c866353ac1dccae833902413';
 
 	/**
 	 * Purchase page. Example URL — replace with the real one. getBuyUrl() appends the current
-	 * instance id (the example already carries a query param, so `&nc_instance=` fits).
+	 * instance id.
 	 */
-	public const BUY_URL = 'https://example.com/buy?product=mkvplayer';
+	public const BUY_URL = 'https://mkvplayer-license-server.rorita.workers.dev/nextcloud?nc_instance=%NC%#pricing';
 
 	public function __construct(
 		private IConfig $config,
@@ -109,7 +109,7 @@ class LicenseService {
 
 	/** Purchase URL with this instance's id appended, for the admin "Buy" link. */
 	public function getBuyUrl(): string {
-		return self::BUY_URL . '&nc_instance=' . rawurlencode($this->getInstanceId());
+		return str_replace('%NC%', rawurlencode($this->getInstanceId()), self::BUY_URL);
 	}
 
 	/** Base64url decode (no padding), returning null on invalid input. */
