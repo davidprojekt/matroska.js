@@ -2,6 +2,7 @@
   "name": "mkv-player-ui",
   "private": true,
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Reusable browser MKV player UI: WASM MKV→fMP4 remux + MSE + video.js v10, with configurable controls and a pluggable ffmpeg.wasm build.",
   "exports": {
