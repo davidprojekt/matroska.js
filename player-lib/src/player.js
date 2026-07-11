@@ -20,6 +20,14 @@ import {
 } from './subtitles.js';
 import { TrackMenu } from './menu.js';
 import { buildControlBar } from './controlBar.js';
+import { verifyLicense } from './license.js';
+
+// Default watermark, forced on for unlicensed players (see the constructor and _applyLicense).
+// A valid license removes it and lets the caller show their own via `opts.watermark`.
+const DEFAULT_WATERMARK = Object.freeze({
+  text: 'matroska.js',
+  href: 'https://github.com/davidprojekt/matroska.js',
+});
 
 // Plain-text subtitle codecs we extract to WebVTT and attach as a native <track>.
 const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']);
@@ -87,17 +95,34 @@ export class MkvPlayer {
     // filename (see _load).
     this._title = opts.title ?? null;
 
-    // Optional bottom-right watermark: a string (shorthand for { text }) or { text, image, href }.
-    // Falsy means no watermark. The element is built only when configured (see buildControlBar);
-    // _setWatermark fills its content below.
-    this._watermark =
+    // Bottom-right watermark. Shown by DEFAULT (the matroska.js mark) and forced while unlicensed —
+    // `opts.watermark` is IGNORED until a valid license is present. A valid `opts.license` removes
+    // the default and lets the caller show their OWN watermark (opts.watermark) or none. The
+    // license check is async (see _applyLicense), so we start in the forced-default state and relax
+    // it on success. The caller's own watermark is a string (→ {text}) or { text, image, href }.
+    this._customWatermark =
       typeof opts.watermark === 'string' ? { text: opts.watermark } : opts.watermark ?? null;
+    // Undocumented escape hatch. Under AGPL the source is public, so watermark removal can't truly
+    // be prevented; this makes the *supported* no-license removal self-identifying in a config
+    // rather than a silent fork. Suppresses the watermark outright, no license required.
+    const forceOff = opts.iRefuseToSupportTheDeveloper === true;
+    // Undocumented embedder-vouch: a first-party host (e.g. the Nextcloud app) that validated the
+    // license through its own channel asserts this session is licensed. Trusted as-is — it's a
+    // trust signal, not crypto (a signed `opts.license` is verified instead). Treated like a valid
+    // license: the default watermark is dropped and the caller's own `watermark` is honored.
+    const vouched = opts.embedderValidatedLicense === true;
+    // Unlicensed → forced default; licensed (vouch now, or a verified key later) → the caller's own
+    // watermark or none; force-off → nothing.
+    this._watermark = forceOff ? null : vouched ? this._customWatermark : DEFAULT_WATERMARK;
 
     // --- build the control bar and capture element references ---
-    const refs = buildControlBar(container, opts.controls, this._watermark);
+    // Build the watermark element unless force-disabled, so an async license check can restyle it.
+    const refs = buildControlBar(container, opts.controls, !forceOff);
     this.refs = refs;
     this.video = refs.video;
     this._setWatermark();
+    // A signed license key is verified offline; on success the caller's watermark choice takes over.
+    if (!forceOff && !vouched && opts.license) this._applyLicense(opts.license);
 
     // Track menus live in the control bar; each exists only if that control is enabled.
     this.audioMenu = refs.audioTrigger
@@ -198,7 +223,14 @@ export class MkvPlayer {
   _setWatermark() {
     const el = this.refs.watermark;
     const wm = this._watermark;
-    if (!el || !wm) return;
+    if (!el) return;
+    // Idempotent: clear any previous content so this can re-run when the license state changes.
+    el.replaceChildren();
+    el.classList.remove('mkv-watermark--link');
+    if (!wm) {
+      el.hidden = true;
+      return;
+    }
 
     let content;
     if (wm.image) {
@@ -224,6 +256,20 @@ export class MkvPlayer {
       el.appendChild(content);
     }
     el.hidden = false;
+  }
+
+  // Verify a supplied license key offline. On success, drop the forced default watermark and honor
+  // the caller's own `watermark` (their brand, or none); an invalid key leaves the default forced.
+  async _applyLicense(key) {
+    let ok = false;
+    try {
+      ok = await verifyLicense(key);
+    } catch {
+      ok = false;
+    }
+    if (this.destroyed || !ok) return;
+    this._watermark = this._customWatermark; // may be null → no watermark at all
+    this._setWatermark();
   }
 
   async _preflight(url) {

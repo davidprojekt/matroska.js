@@ -9,9 +9,12 @@
 //     transcode: 'auto',                // 'auto' | true | false
 //     title: 'My video',                // default title bar text; per-load override via load(url, { title })
 //                                        // falls back to the MKV segment title, then the URL filename
-//     watermark: 'Brand',               // bottom-right watermark: a string (shorthand for { text }),
+//     license: 'KEY',                   // signed license key (verified offline). Without one, a small
+//                                        // matroska.js watermark is shown and `watermark` below is IGNORED.
+//     watermark: 'Brand',               // your own bottom-right watermark — HONORED ONLY WITH A VALID
+//                                        // license (else the default is forced). A string (→ { text }),
 //                                        // or { text, image, href }. image = logo URL; href = link.
-//                                        // Always visible, fades/lifts with the controls (see style.css).
+//                                        // Fades/lifts with the controls (see style.css).
 //     ffmpeg: { coreURL, wasmURL },     // where to load the ffmpeg.wasm core from (any CORS-enabled origin)
 //     onStatus(msg, { level }) {},      // level: 'loading' | 'info'
 //     onError(err) {},

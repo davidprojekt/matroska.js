@@ -114,9 +114,12 @@ export default {
 					},
 				}
 
-				// Watermark for unlicensed instances only. `cfg.licensed` is a server-validated boolean
-				if (!cfg.licensed) {
-					playerOpts.watermark = { text: 'matroska.js', href: 'https://github.com/davidprojekt/matroska.js' }
+				// player-lib forces its default watermark unless told the session is licensed. The
+				// license is validated server-side (offline, instance-bound); `cfg.licensed` is that
+				// trusted boolean. Vouch for it so player-lib drops the watermark on licensed
+				// instances; unlicensed instances fall through and get the forced default.
+				if (cfg.licensed) {
+					playerOpts.embedderValidatedLicense = true
 				}
 
 				this.player = createPlayer(this.$refs.stage, playerOpts)
