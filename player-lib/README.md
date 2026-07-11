@@ -1,6 +1,6 @@
 # mkv-player-ui
 
-The reusable browser MKV player extracted from `player-web` and `player-embed`. It parses
+The reusable browser MKV player extracted from `player-web`. It parses
 `.mkv`/`.webm` with the `mkv-player` WASM remuxer, remuxes to fragmented MP4 on the fly,
 and plays it through Media Source Extensions behind a [video.js v10](https://www.npmjs.com/package/@videojs/html)
 control bar. Unsupported audio codecs are transcoded in-browser with ffmpeg.wasm; ASS/SSA
@@ -112,7 +112,7 @@ npm hoists jassub's CJS deps (`throughput`, `rvfc-polyfill`) where esbuild can f
 
 To fully drop ffmpeg from a build (in addition to `transcode: false`), alias `@ffmpeg/ffmpeg`
 and `@ffmpeg/util` to `mkv-player-ui/src/ffmpeg-stub.js` and define `__TRANSCODE__` as
-`false`. See `player-embed/vite.config.js` for the reference setup.
+`false` in your bundler config (a `resolve.alias` plus the `define`).
 
 ## Test
 

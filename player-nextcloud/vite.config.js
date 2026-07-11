@@ -3,8 +3,8 @@ import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 
 // The mkv-player-ui library ships as ESM *source* that this app's bundler must compile. It
-// relies on three things the consumer build has to preserve (see player-embed/vite.config.js,
-// the reference setup): its wasm/worker `new URL(…, import.meta.url)` references, ES-module
+// relies on three things the consumer build has to preserve: its wasm/worker
+// `new URL(…, import.meta.url)` references, ES-module
 // workers, and a couple of force-bundled CJS deps. We inject those via createAppConfig's
 // `config` override so the Nextcloud build pipeline keeps them intact.
 
@@ -54,8 +54,8 @@ export default createAppConfig(
     config: overrides,
     // Disable @nextcloud/vite-config's default vite-plugin-node-polyfills. It rewrites the
     // mkv-player wasm-pack glue (which lives outside this app dir) to import a `global` shim
-    // that then can't be resolved, breaking the build. player-embed builds the same library
-    // with plain Vite and no polyfills, so the glue doesn't need them at runtime.
+    // that then can't be resolved, breaking the build. The library builds with plain Vite
+    // and no polyfills, so the glue doesn't need them at runtime.
     nodePolyfills: false,
   }
 );
