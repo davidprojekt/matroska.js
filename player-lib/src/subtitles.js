@@ -171,12 +171,39 @@ export class SubtitleRenderer {
     }
   }
 
+  /**
+   * Force an immediate repaint at the current playback time while paused.
+   *
+   * JASSUB otherwise paints only from `requestVideoFrameCallback`, which fires only when a
+   * new video frame is presented — i.e. during playback. So after `setTrack` while paused,
+   * the freshly-loaded track would sit undrawn until the user presses play. `manualRender`
+   * draws at the supplied `mediaTime` and (unlike `resize`) does not depend on a previously
+   * presented frame, so it is safe to call while paused. During playback RVFC already
+   * handles this, so guard on `paused` to avoid fighting/duplicating it (mirrors JASSUB's
+   * own `resize(forceRepaint = !!this._video?.paused)` convention).
+   */
+  _paintNow() {
+    if (!this.instance || !this.video || !this.video.paused) return;
+    try {
+      this.instance.manualRender(
+        {
+          mediaTime: this.video.currentTime,
+          width: this.video.videoWidth,
+          height: this.video.videoHeight,
+          expectedDisplayTime: performance.now(),
+        },
+        true
+      );
+    } catch (_) {}
+  }
+
   /** Start rendering `doc` (a full ASS document) immediately. */
   async show(doc) {
     this.doc = doc;
     this.ensureInstance();
     if (this.canvas) this.canvas.style.display = '';
     await this._withRenderer((r) => r.setTrack(this.doc));
+    this._paintNow();
   }
 
   /** Re-render with a fresh `doc`, debounced (cues trickle in as playback streams). */
@@ -185,7 +212,7 @@ export class SubtitleRenderer {
     if (this.rebuildTimer || !this.instance) return;
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
-      this._withRenderer((r) => r.setTrack(this.doc));
+      this._withRenderer((r) => r.setTrack(this.doc)).then(() => this._paintNow());
     }, REBUILD_DEBOUNCE_MS);
   }
 
