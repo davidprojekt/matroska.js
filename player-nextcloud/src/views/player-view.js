@@ -114,11 +114,9 @@ export default {
 					},
 				}
 
-				// Watermark for unlicensed instances only. `cfg.licensed` is the server-validated
-				// result of the admin's license key (the key itself is never sent here). Text is the
-				// default; swap to `{ image: generateFilePath('mkvplayer','','img/<file>') }` for a logo.
+				// Watermark for unlicensed instances only. `cfg.licensed` is a server-validated boolean
 				if (!cfg.licensed) {
-					playerOpts.watermark = { text: 'MKV Player' }
+					playerOpts.watermark = { text: 'matroska.js', href: 'https://github.com/davidprojekt/matroska.js' }
 				}
 
 				this.player = createPlayer(this.$refs.stage, playerOpts)

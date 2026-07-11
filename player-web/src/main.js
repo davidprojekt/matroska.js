@@ -24,6 +24,7 @@ const player = createPlayer(document.querySelector('.stage'), {
     coreURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
     wasmURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm',
   },
+  watermark: { text: 'matroska.js', href: 'https://github.com/davidprojekt/matroska.js' },
   onStatus: (msg) => status(msg),
   onError: (e) => status('Error: ' + e.message),
 });
