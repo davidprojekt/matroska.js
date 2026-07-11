@@ -28,6 +28,7 @@ class LicenseAdminSettings implements ISettings {
 
 	public function getForm(): TemplateResponse {
 		Util::addScript(Application::APP_ID, 'mkvplayer-admin-settings');
+		Util::addStyle(Application::APP_ID, 'mkvplayer-admin-settings');
 
 		$stored = $this->config->getLicenseKey();
 		$validation = $this->license->validate($stored);

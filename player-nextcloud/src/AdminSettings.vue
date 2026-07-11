@@ -151,10 +151,10 @@ export default {
 .mkvplayer-license__status.is-invalid {
 	color: var(--color-error, #c9302c);
 }
-.mkvplayer-license__buy {
-	margin-top: 1rem;
-}
 .mkvplayer-license__buy .button {
 	display: inline-block;
+}
+#mkvplayer-license-key {
+  width: min(max(25rem, 30%), 100%);
 }
 </style>
