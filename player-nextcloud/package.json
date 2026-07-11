@@ -7,8 +7,9 @@
   "description": "Nextcloud app that plays .mkv/.mka files in the Viewer via mkv-player-ui.",
   "scripts": {
     "dev": "vite --mode development build --watch",
-    "build": "bash -c 'cd ../mkv-player && npm run build' && vite build",
-    "build:app": "vite build",
+    "clean": "rm -rf js css dist assets",
+    "build": "npm run clean && bash -c 'cd ../mkv-player && npm run build' && vite build",
+    "build:app": "npm run clean && vite build",
     "setup:ffmpeg": "FFMPEG_OUT_DIR=ffmpeg node ../player-lib/scripts/setup-ffmpeg-core.mjs",
     "assemble": "bash scripts/assemble.sh",
     "deploy": "npm run build:app && npm run setup:ffmpeg && npm run assemble"

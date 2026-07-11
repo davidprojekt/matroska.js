@@ -169,13 +169,18 @@ video-player:has(.media-default-skin--dock-below:not(:fullscreen)) {
 /* Bottom-right watermark. Always visible while shown, but it fades and lifts by keying off the
    skin's own `.media-controls[data-visible]` state — the same pure-CSS mechanism the title bar
    uses, so no JS runs per frame. At rest (UI hidden) it's faint and hugs the bottom edge; when
-   the controls appear it becomes near-opaque and rises above the control bar. z-index 15 sits
-   above the subtitle/scrim layer (5) but below the dropdown menus (30). */
+   the controls appear it becomes near-opaque and rises above the control bar.
+
+   z-index 9 sits just BELOW the skin's control bar (`.media-controls` is z-index 10 and forms its
+   own stacking context). It must stay below it: the bar's dropdown menus (audio/subs/chapters)
+   have z-index 30 only *within* that context, so a watermark above the bar as a whole would paint
+   over — and visually block — the menus even when it lifts into the same corner. Above the video/
+   subtitle/scrim layers (all z-index ≤ 1), below the bar. */
 .mkv-watermark {
   position: absolute;
   right: 0.75rem;
   bottom: 0.75rem;
-  z-index: 15;
+  z-index: 9;
   pointer-events: none;
   opacity: 0.35;
   color: var(--media-color-primary, oklch(1 0 0));
