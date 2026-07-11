@@ -7,7 +7,6 @@ import 'mkv-player-ui/style.css';
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');
 const loadBtn = document.getElementById('load');
-const copyBtn = document.getElementById('copy');
 const fileInput = document.getElementById('fileInput');
 
 const status = (msg) => {
@@ -40,23 +39,6 @@ fileInput.addEventListener('change', (e) => {
     pickedFileName = file.name;
   }
 });
-
-// Copy a shareable link: the current URL Base64-encoded into the page's #hash.
-copyBtn.addEventListener('click', () => {
-  const hashedUrl = new URL(window.location.href);
-  hashedUrl.hash = '#' + btoa(urlInput.value);
-  navigator.clipboard.writeText(hashedUrl.href);
-});
-
-// A #hash on load is a shared link — decode it into the URL box.
-const hash = window.location.hash.substring(1);
-if (hash) {
-  try {
-    urlInput.value = atob(hash);
-  } catch (e) {
-    console.error('The hash is not a valid Base64 encoded string:', e);
-  }
-}
 
 const load = (url) =>
   // Local files load from a blob: URL with no derivable filename, so show the picked name.
