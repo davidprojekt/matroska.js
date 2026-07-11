@@ -14,8 +14,7 @@ Vorbis/Opus/FLAC/ALAC/WavPack/TTA/PCM plus **AAC-LC, AC-3, E-AC-3, DTS core**, e
 BSD libs (no external nonfree lib, no `--enable-gpl`), so the binary is **LGPL / AGPL-compatible**.
 
 Patent posture (separate from copyleft): Opus/Vorbis/FLAC/PCM are royalty-free; **AAC-LC, AC-3 and
-DTS core** have expired core patents / are commonly treated as license-free; **E-AC-3 is newer and
-may still be patented in some jurisdictions** — included at the maintainer's discretion. HE-AAC/
+DTS core** have expired core patents / are commonly treated as license-free; **E-AC-3 is newer and there has been no official verdict that proves it's royalty-free**. HE-AAC/
 xHE-AAC, TrueHD/MLP and DTS-HD are excluded (see `profiles/full.env.example`). See
 `profiles/free-audio.env`. Only one demuxer (Matroska) and one muxer (MP4) are built: the WASM core
 feeds ffmpeg a self-contained Matroska chunk of raw audio, and MSE needs the fragmented-MP4 output.
