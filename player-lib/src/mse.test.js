@@ -3,7 +3,7 @@
 // infinite-buffering stall (see bufferedEndAcrossGaps in mse.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bufferedEndAcrossGaps, chooseFeedTarget } from './mse.js';
+import { bufferedEndAcrossGaps, chooseFeedTarget, Pump, MseController } from './mse.js';
 
 const video = (o) => ({ id: 'video', prioritized: true, deficit: 0, pumpFull: false, done: false, ...o });
 const audio = (o) => ({ id: 'audio', prioritized: false, deficit: 0, pumpFull: false, done: false, ...o });
@@ -87,4 +87,115 @@ test('returns null when nothing needs feeding (loop terminates)', () => {
 test('between two non-prioritized streams, larger deficit wins', () => {
   const pick = chooseFeedTarget([audio({ id: 'a1', deficit: 1000 }), audio({ id: 'a2', deficit: 4000 })]);
   assert.equal(pick.id, 'a2');
+});
+
+// --- SourceBuffer eviction / quota-aware retry (the "MediaSource buffer not
+// sufficient" appendBuffer stall) --------------------------------------------
+
+// Minimal SourceBuffer stand-in: appends can be primed to throw QuotaExceededError,
+// and operations complete synchronously via _complete() (fires the updateend listener).
+class FakeSB {
+  constructor() {
+    this.updating = false;
+    this.timestampOffset = 0;
+    this.ops = [];
+    this._listeners = [];
+    this.quotaAppends = 0; // number of upcoming appends that should throw quota
+    this.buffered = { length: 0, start: () => 0, end: () => 0 };
+  }
+  addEventListener(type, fn) {
+    if (type === 'updateend') this._listeners.push(fn);
+  }
+  appendBuffer(buf) {
+    if (this.quotaAppends > 0) {
+      this.quotaAppends -= 1;
+      const e = new Error('SourceBuffer full');
+      e.name = 'QuotaExceededError';
+      throw e;
+    }
+    this.ops.push({ append: buf });
+    this.updating = true;
+  }
+  remove(start, end) {
+    this.ops.push({ remove: [start, end] });
+    this.updating = true;
+  }
+  _complete() {
+    this.updating = false;
+    for (const fn of this._listeners.slice()) fn();
+  }
+}
+
+test('quota on append evicts old data then retries the same segment', () => {
+  const sb = new FakeSB();
+  sb.quotaAppends = 1;
+  const pump = new Pump(sb);
+  pump.onQuotaExceeded = () => [0, 10];
+  pump.push('seg');
+  // First append threw quota → an eviction was spliced in front and executed.
+  assert.deepEqual(sb.ops, [{ remove: [0, 10] }]);
+  assert.equal(pump.queue.length, 1); // the segment is still queued for retry
+  sb._complete(); // remove finishes → retry the append, which now succeeds
+  assert.deepEqual(sb.ops, [{ remove: [0, 10] }, { append: 'seg' }]);
+  assert.equal(pump.queue.length, 0);
+});
+
+test('quota with nothing to evict drops the segment (no wedged pump)', () => {
+  const sb = new FakeSB();
+  sb.quotaAppends = 1;
+  const pump = new Pump(sb);
+  pump.onQuotaExceeded = () => null;
+  pump.push('seg');
+  assert.deepEqual(sb.ops, []); // nothing appended, nothing evicted
+  assert.equal(pump.queue.length, 0); // segment dropped rather than retried forever
+});
+
+test('quota that persists after eviction drops the segment after one retry', () => {
+  const sb = new FakeSB();
+  sb.quotaAppends = 2; // still full even after we free space
+  const pump = new Pump(sb);
+  pump.onQuotaExceeded = () => [0, 10];
+  pump.push('seg');
+  assert.deepEqual(sb.ops, [{ remove: [0, 10] }]);
+  sb._complete(); // remove done → retry append → quota again → give up
+  assert.deepEqual(sb.ops, [{ remove: [0, 10] }]); // no second eviction, no append
+  assert.equal(pump.queue.length, 0);
+});
+
+test('a remove enqueued behind an append runs in order', () => {
+  const sb = new FakeSB();
+  const pump = new Pump(sb);
+  pump.push('seg');
+  pump.pushRemove(0, 5);
+  assert.equal(pump.hasPendingRemove(), true);
+  assert.deepEqual(sb.ops, [{ append: 'seg' }]); // append started; remove waits its turn
+  sb._complete();
+  assert.deepEqual(sb.ops, [{ append: 'seg' }, { remove: [0, 5] }]);
+  assert.equal(pump.hasPendingRemove(), false);
+});
+
+// evictionRange is a pure controller method (reads this.video.currentTime + sb.buffered),
+// so it can be exercised on a bare prototype instance without a real MediaSource.
+const controllerAt = (currentTime) =>
+  Object.assign(Object.create(MseController.prototype), { video: { currentTime } });
+const buffered = (pairs) => ({
+  length: pairs.length,
+  start: (i) => pairs[i][0],
+  end: (i) => pairs[i][1],
+});
+
+test('evictionRange trims everything up to keepBehind before the playhead', () => {
+  const c = controllerAt(100);
+  assert.deepEqual(c.evictionRange({ buffered: buffered([[0, 95]]) }, 30), [0, 70]);
+});
+
+test('evictionRange returns null near the start (nothing old enough)', () => {
+  const c = controllerAt(20);
+  assert.equal(c.evictionRange({ buffered: buffered([[0, 25]]) }, 30), null);
+});
+
+test('evictionRange returns null when the old data was already evicted', () => {
+  const c = controllerAt(100);
+  // Buffer already starts at 80, past the cutoff (70) → nothing left to reclaim.
+  assert.equal(c.evictionRange({ buffered: buffered([[80, 95]]) }, 30), null);
 });

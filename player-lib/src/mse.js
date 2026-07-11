@@ -15,6 +15,17 @@ const GAP_TOLERANCE_MS = 500;
 // monopolizing the shared topUp pass.
 const MAX_PENDING = 4;
 
+// Played-out data is evicted to bound SourceBuffer memory. MSE enforces a per-buffer
+// quota; without eviction the buffer grows unbounded until appendBuffer throws
+// QuotaExceededError, after which the stream stalls permanently. Steady state keeps
+// KEEP_BEHIND_S of already-played media behind the playhead (so short backward seeks
+// replay from buffer instead of re-feeding), and only trims once EVICT_BEHIND_S has
+// accumulated — batching removals rather than running one on every timeupdate. On an
+// actual quota error the pump reclaims harder, down to QUOTA_KEEP_BEHIND_S.
+const KEEP_BEHIND_S = 30;
+const EVICT_BEHIND_S = 45;
+const QUOTA_KEEP_BEHIND_S = 10;
+
 // --- DEBUG instrumentation -------------------------------------------------
 // Toggle at runtime in the console: `window.MSE_DEBUG = true` (or `false`).
 // Defaults to on so the buffering bug can be observed without a rebuild.
@@ -63,10 +74,13 @@ function playheadState(sb, t) {
 }
 
 /** Serializes appends/removes on a SourceBuffer through its `updateend` event. */
-class Pump {
+export class Pump {
   constructor(sb) {
     this.sb = sb;
     this.queue = [];
+    // Set by the controller: returns a [start, end] (seconds) range of old buffered data
+    // to evict when an append hits the quota, or null if nothing can be reclaimed.
+    this.onQuotaExceeded = null;
     sb.addEventListener('updateend', () => this.flush());
   }
   // `timestampOffset` (seconds) is applied just before the append when set — used by the
@@ -75,17 +89,55 @@ class Pump {
     this.queue.push({ buf, timestampOffset });
     this.flush();
   }
+  // Enqueue an eviction of buffered data in [start, end) seconds. Serialized through the
+  // same queue as appends so the two never race for the SourceBuffer's single update slot.
+  pushRemove(start, end) {
+    this.queue.push({ remove: [start, end] });
+    this.flush();
+  }
+  hasPendingRemove() {
+    return this.queue.some((item) => item.remove);
+  }
   flush() {
     if (this.sb.updating || this.queue.length === 0) return;
-    const { buf, timestampOffset } = this.queue.shift();
+    // Peek, don't shift: a failed append must stay at the head so we can retry it after
+    // eviction. It's removed only once the operation is accepted by the SourceBuffer.
+    const item = this.queue[0];
     try {
-      if (timestampOffset != null && this.sb.timestampOffset !== timestampOffset) {
-        this.sb.timestampOffset = timestampOffset;
+      if (item.remove) {
+        this.sb.remove(item.remove[0], item.remove[1]);
+        this.queue.shift();
+        return;
       }
-      this.sb.appendBuffer(buf);
+      if (item.timestampOffset != null && this.sb.timestampOffset !== item.timestampOffset) {
+        this.sb.timestampOffset = item.timestampOffset;
+      }
+      this.sb.appendBuffer(item.buf);
+      this.queue.shift();
     } catch (e) {
-      console.error('appendBuffer failed', e);
+      if (e && e.name === 'QuotaExceededError' && !item.remove) {
+        this.handleQuota(item);
+        return;
+      }
+      this.queue.shift();
+      console.error(item.remove ? 'remove failed' : 'appendBuffer failed', e);
     }
+  }
+  // Recover from a full SourceBuffer: evict old (played-out) data, then retry the append
+  // that just failed. The failed segment is still at the head of the queue; we splice an
+  // eviction in front of it so the remove runs first and the append is retried on its
+  // `updateend`. One retry per segment (`quotaTried`) — if it still won't fit, drop it to
+  // avoid a hot loop rather than wedging the pump.
+  handleQuota(item) {
+    const range = this.onQuotaExceeded ? this.onQuotaExceeded() : null;
+    if (range && range[1] > range[0] && !item.quotaTried) {
+      item.quotaTried = true;
+      this.queue.unshift({ remove: [range[0], range[1]] });
+      this.flush(); // sb isn't updating (the append was rejected synchronously) — runs the remove
+      return;
+    }
+    this.queue.shift();
+    console.error('appendBuffer failed: SourceBuffer full, nothing left to evict');
   }
   clear() {
     this.queue.length = 0;
@@ -405,6 +457,7 @@ export class MseController {
       }
       const sb = this.mediaSource.addSourceBuffer(track.mime);
       const pump = new Pump(sb);
+      pump.onQuotaExceeded = () => this.evictionRange(sb, QUOTA_KEEP_BEHIND_S);
       const init = this.player.init_segment(BIG(track.number));
       if (init && init.length) pump.push(init);
       const feeder = new TrackFeeder(this.player, track.number, this.boundaries, pump);
@@ -418,6 +471,7 @@ export class MseController {
     }
     const sb = this.mediaSource.addSourceBuffer(plan.mime);
     const pump = new Pump(sb);
+    pump.onQuotaExceeded = () => this.evictionRange(sb, QUOTA_KEEP_BEHIND_S);
     let feeder;
     if (plan.transcoded) {
       // Each transcoded fragment carries its own init — no separate init segment.
@@ -440,6 +494,28 @@ export class MseController {
   // backward seek), returns `currentMs` so it reads as "below target" and feeds.
   bufferedEndMs(stream, currentMs) {
     return bufferedEndAcrossGaps(stream.sb.buffered, currentMs, GAP_TOLERANCE_MS);
+  }
+
+  // Range [start, end] (seconds) of played-out buffer safe to remove: everything from 0
+  // up to `keepBehindS` before the playhead. Returns null when nothing that old exists
+  // (also the natural stop for the quota-retry loop, since a second removal of the same
+  // already-evicted range would yield null and the append is dropped instead of looping).
+  evictionRange(sb, keepBehindS) {
+    if (!sb.buffered.length) return null;
+    const cutoff = this.video.currentTime - keepBehindS;
+    if (cutoff <= 0 || sb.buffered.start(0) >= cutoff) return null;
+    return [0, cutoff];
+  }
+
+  // Queue an eviction for a stream once more than EVICT_BEHIND_S of played-out media has
+  // accumulated, trimming back to KEEP_BEHIND_S. Skipped if a removal is already pending
+  // so removes don't pile up. Called once per topUp pass.
+  evictOld(stream) {
+    const sb = stream.sb;
+    if (!sb.buffered.length || stream.pump.hasPendingRemove()) return;
+    if (this.video.currentTime - sb.buffered.start(0) <= EVICT_BEHIND_S) return;
+    const range = this.evictionRange(sb, KEEP_BEHIND_S);
+    if (range) stream.pump.pushRemove(range[0], range[1]);
   }
 
   // Buffer-ahead target (ms) for a stream. Transcoded audio is built much further
@@ -466,6 +542,11 @@ export class MseController {
     if (this.topUpQueued) return;
     this.topUpQueued = true;
     try {
+      // Bound buffer memory before filling more: drop played-out data that's piled up
+      // behind the playhead so we never reach the SourceBuffer quota in the first place.
+      for (const stream of [this.video$, this.audio$]) {
+        if (stream) this.evictOld(stream);
+      }
       let guard = 0;
       while (guard++ < 256) {
         const currentMs = this.video.currentTime * 1000;
