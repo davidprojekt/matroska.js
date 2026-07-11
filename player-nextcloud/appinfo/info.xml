@@ -3,12 +3,57 @@
       xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
     <id>mkvplayer</id>
     <name>MKV Player</name>
-    <summary>Play Matroska (.mkv/.mka) files directly in the Nextcloud Viewer.</summary>
+    <summary>Play Matroska (.mkv) video in the Viewer — in-browser, offline, no server transcoding.</summary>
     <description><![CDATA[
-Plays Matroska `.mkv` and `.mka` files in the browser via the built-in Viewer, using an
-in-browser WASM remux to fragmented MP4 + Media Source Extensions. ASS/SSA subtitles render
-with libass. Unsupported audio codecs can optionally be transcoded with ffmpeg.wasm — no
-ffmpeg core is bundled; an administrator configures the core/wasm URLs in the admin settings.
+Plays Matroska `.mkv` files right inside Nextcloud's built-in Viewer. Click a file and it plays
+in place — no download, no server-side conversion, no external services.
+
+**How it works**
+
+Everything runs in the viewer's browser. The file is remuxed on the fly from Matroska to
+fragmented MP4 and played through Media Source Extensions (WebAssembly). Your server just serves
+the original file over HTTP range requests — it does no transcoding and stores nothing extra.
+
+**Subtitles**
+
+Text (SRT/WebVTT), ASS/SSA (rendered with libass, with embedded fonts and styling) and PGS image
+subtitles. Multiple tracks are supported, including two shown at once.
+
+**Codec support — please read**
+
+Because the **video is remuxed, not transcoded**, the video track must be one your browser can
+already decode:
+
+- **H.264 / AVC** — plays virtually everywhere.
+- **HEVC / H.265, VP9, AV1** — only where the browser and OS support them (varies by device; HEVC
+  in particular is limited outside Safari and hardware-accelerated Edge/Chrome).
+
+Video in a codec your browser cannot decode will not play — the app does not convert video.
+
+**Audio** is more flexible. Browser-native tracks play directly, and several non-native codecs
+(**Vorbis, AC-3, E-AC-3, DTS core**) are transcoded in the browser to AAC-LC or Opus using a
+royalty-free ffmpeg.wasm core that ships with the app and is served from your own server (fully
+offline). **Not supported out of the box:** TrueHD/MLP, DTS-HD and HE-AAC — excluded for
+patent/licensing reasons. An administrator can point the app at a self-built, fuller ffmpeg.wasm
+build to add them (note: that makes each viewer's browser contact the configured host).
+
+**Free & paid (freemium)**
+
+The app is free and fully functional. Unlicensed instances show a small watermark in the corner of
+the video; an optional paid license removes it. **License validation is done entirely offline on
+your own server** — the key is never sent to us or any third party, and no usage data is
+transmitted.
+
+**Privacy**
+
+By default the app makes no external network requests: playback, audio transcoding and license
+validation all happen locally. The only exception is the optional, admin-enabled external
+ffmpeg.wasm source described above.
+
+**Note:** `.mka` (Matroska audio) is not enabled by default — Nextcloud has no built-in MIME
+mapping for it. The handler already registers `audio/x-matroska`, so an administrator can enable
+`.mka` by adding that MIME mapping — but this is a video player, so audio-only playback is just a
+byproduct.
     ]]></description>
     <version>0.1.0</version>
     <licence>agpl</licence>
