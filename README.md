@@ -4,6 +4,9 @@ An experimental Matroska / EBML toolkit written in Rust, compiled to WebAssembly
 so it can parse `.mkv` / `.webm` files **directly in the browser** — nothing is
 uploaded.
 
+**Live demos:** [play a `.mkv`](https://play.matroska.davidschneider.xyz) ·
+[explore EBML structure](https://inspect.matroska.davidschneider.xyz)
+
 > ⚠️ **Early prototype.** APIs are unstable,
 > there are rough edges throughout. Expect bugs.
 

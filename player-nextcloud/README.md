@@ -111,12 +111,15 @@ a **Buy** link that opens the purchase page with this instance's id appended.
 Implemented in `lib/Service/LicenseService.php` (validation + buy URL), `lib/Settings/
 LicenseAdminSettings.php` + `src/AdminSettings.vue` (admin UI), and `lib/Controller/
 LicenseController.php` (`POST /settings/license`, admin-only). The watermark itself is a
-`mkv-player-ui` option, passed by `src/views/player-view.js` only when the instance is unlicensed.
+forced by `mkv-player-ui` unless it's told the session is licensed; `src/views/player-view.js`
+passes `embedderValidatedLicense` (a trusted vouch, not the key) only on licensed instances.
 
-**Before shipping, replace two placeholders** in `lib/Service/LicenseService.php`:
+**Before shipping, replace the placeholder public key** in `lib/Service/LicenseService.php`:
 
 - `PUBLIC_KEY_HEX` — swap the generated **test** public key for your production one.
-- `BUY_URL` — set your real purchase URL (`getBuyUrl()` substitutes `%NC%` with the instance id).
+
+(`BUY_URL` is already set to the live landing page, `https://matroska.davidschneider.xyz/nextcloud`;
+`getBuyUrl()` substitutes `%NC%` with the instance id.)
 
 **Minting test keys** (dev only). The test keypair lives in `dev/license-test-keys.txt`
 (gitignored); `scripts/sign-license.php` signs a key with the private seed:

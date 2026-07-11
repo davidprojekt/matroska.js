@@ -33,10 +33,10 @@ class LicenseService {
 	public const PUBLIC_KEY_HEX = '535f9230fd3c5c2a0ff386b699c421657b3a3225c866353ac1dccae833902413';
 
 	/**
-	 * Purchase page. Example URL — replace with the real one. getBuyUrl() appends the current
-	 * instance id.
+	 * Purchase page (landing site handles Nextcloud orders). getBuyUrl() substitutes the current
+	 * instance id into the %NC% placeholder.
 	 */
-	public const BUY_URL = 'https://mkvplayer-license-server.rorita.workers.dev/nextcloud?nc_instance=%NC%#pricing';
+	public const BUY_URL = 'https://matroska.davidschneider.xyz/nextcloud?nc_instance=%NC%#pricing';
 
 	public function __construct(
 		private IConfig $config,
