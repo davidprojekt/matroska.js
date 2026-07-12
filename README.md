@@ -25,7 +25,7 @@ once** (e.g. dialogue + signs):
 
 - **ASS/SSA** via [libass](https://github.com/libass/libass) (through
   [JASSUB](https://github.com/ThaUnknown/jassub)), with embedded fonts.
-- **PGS** (`S_HDMV/PGS`, Blu-ray bitmap subtitles) via
+- **PGS** (`S_HDMV/PGS`, HDMV bitmap subtitles) via
   [libpgs](https://github.com/Arcus92/libpgs-js).
 
 Per-block zlib-compressed subtitle tracks (mkvmerge's default) are decompressed
@@ -73,12 +73,12 @@ listed as *not muxable*; tracks it wraps but the browser can't decode are flagge
 | Audio     | `A_FLAC`                           | FLAC                 | `fLaC`            |
 | Audio     | `A_MPEG/L3`                        | MP3                  | `mp4a` (`.6B`)    |
 | Subtitle  | `S_TEXT/ASS`, `S_TEXT/SSA`         | rendered via libass (JASSUB) | (extracted)   |
-| Subtitle  | `S_HDMV/PGS`                       | Blu-ray bitmap, rendered via libpgs | (extracted, reconstructed `.sup`) |
+| Subtitle  | `S_HDMV/PGS`                       | HDMV bitmap, rendered via libpgs | (extracted, reconstructed `.sup`) |
 | Subtitle  | `S_TEXT/UTF8`, `S_TEXT/WEBVTT`, `S_TEXT/ASCII` | text → WebVTT — **not working yet** | (extracted) |
 
 Audio the browser can't decode natively (e.g. AC-3/E-AC-3 in some browsers) is
 transcoded in-browser to AAC (or Opus) by the bundled ffmpeg.wasm core, so it plays
-without a native decoder. Other audio codecs not listed above (DTS, TrueHD, Vorbis, PCM)
+without a native decoder. Other audio codecs not listed above (DTS, MLP, Vorbis, PCM)
 route through the same transcoder. Video is never transcoded, so an undecodable video
 codec (e.g. HEVC in Firefox, or MPEG-2/older) is listed but won't play. MP3 frame
 durations assume MPEG-1 Layer III (1152 samples/frame); the rarer MPEG-2/2.5 Layer III

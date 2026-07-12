@@ -33,7 +33,7 @@ const DEFAULT_WATERMARK = Object.freeze({
 const TEXT_SUB_CODECS = new Set(['S_TEXT/UTF8', 'S_TEXT/WEBVTT', 'S_TEXT/ASCII']);
 // ASS/SSA codecs rendered via libass (JASSUB) over a canvas overlay.
 const ASS_SUB_CODECS = new Set(['S_TEXT/ASS', 'S_TEXT/SSA']);
-// PGS (Blu-ray) bitmap subtitles rendered via libpgs over a canvas overlay. VobSub/DVBSUB
+// PGS (HDMV) bitmap subtitles rendered via libpgs over a canvas overlay. VobSub/DVBSUB
 // are also bitmap formats but libpgs can't render them, so they stay unsupported.
 const PGS_SUB_CODECS = new Set(['S_HDMV/PGS']);
 // The two canvas-overlay kinds (ASS + PGS); they share the ≤2 simultaneous-render cap.

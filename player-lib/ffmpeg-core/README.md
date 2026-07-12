@@ -15,7 +15,7 @@ BSD libs (no external nonfree lib, no `--enable-gpl`), so the binary is **LGPL /
 
 Patent posture (separate from copyleft): Opus/Vorbis/FLAC/PCM are royalty-free; **AAC-LC, AC-3 and
 DTS core** have expired core patents / are commonly treated as license-free; **E-AC-3 is newer and there has been no official verdict that proves it's royalty-free**. HE-AAC/
-xHE-AAC, TrueHD/MLP and DTS-HD are excluded (see `profiles/full.env.example`). See
+xHE-AAC, MLP and DTS-HD are excluded (see `profiles/full.env.example`). See
 `profiles/free-audio.env`. Only one demuxer (Matroska) and one muxer (MP4) are built: the WASM core
 feeds ffmpeg a self-contained Matroska chunk of raw audio, and MSE needs the fragmented-MP4 output.
 
@@ -28,7 +28,7 @@ offer); `LICENSE` bundles the real license texts from the sources.
 
 ## Bigger builds (opt-in, your responsibility)
 
-Need the still-patented lossless codecs the default omits — **TrueHD/MLP, DTS-HD**? Copy
+Need the still-patented lossless codecs the default omits — **MLP, DTS-HD**? Copy
 `profiles/full.env.example` → `profiles/full.env`, read the patent notice, then:
 
 ```sh

@@ -3,7 +3,7 @@
 //! Just enough to emit a self-contained, single-audio-track Matroska chunk
 //! (EBML header + Segment{ Info + Tracks + Cluster(s) }) for one time window. The
 //! chunk is handed to ffmpeg.wasm in the browser to transcode audio codecs that
-//! MSE can't decode natively (DTS, TrueHD, Vorbis, PCM, …). `matroska-ebml` is a
+//! MSE can't decode natively (DTS, MLP, Vorbis, PCM, …). `matroska-ebml` is a
 //! parser only, so the encoder lives here.
 //!
 //! The chunk's timeline is **zero-anchored** at its first frame: ffmpeg's MP4
