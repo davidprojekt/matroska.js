@@ -11,9 +11,7 @@
 // The signature is verified but NOT bound to any origin (signature-only): a valid key unlocks on
 // any site. The signing SEED must stay secret; the public key below is meant to be published.
 //
-// ⚠️ PLACEHOLDER KEY — replace PUBLIC_KEY_HEX with your production public key before selling
-// licenses. This is the shared dev/test key (matches player-nextcloud); its seed is dev-only.
-const PUBLIC_KEY_HEX = '535f9230fd3c5c2a0ff386b699c421657b3a3225c866353ac1dccae833902413';
+const PUBLIC_KEY_HEX = 'a962ad6207366d57edf1c9b2d0742f99dd660908556470f49d8a2332ccf71e15';
 
 const hexToBytes = (hex) => {
   const out = new Uint8Array(hex.length / 2);

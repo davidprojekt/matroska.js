@@ -25,12 +25,8 @@ use OCP\IConfig;
 class LicenseService {
 	/**
 	 * Ed25519 public key (hex, 32 bytes) used to verify license signatures.
-	 *
-	 * NOTE: this is a generated TEST key — replace it with your production public key. The matching
-	 * private seed lives in dev/license-test-keys.txt (gitignored) and is used by
-	 * scripts/sign-license.php to mint test keys.
 	 */
-	public const PUBLIC_KEY_HEX = '535f9230fd3c5c2a0ff386b699c421657b3a3225c866353ac1dccae833902413';
+	public const PUBLIC_KEY_HEX = 'a962ad6207366d57edf1c9b2d0742f99dd660908556470f49d8a2332ccf71e15';
 
 	/**
 	 * Purchase page (landing site handles Nextcloud orders). getBuyUrl() substitutes the current
