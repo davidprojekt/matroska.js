@@ -1,5 +1,5 @@
 [package]
-name = "ebml-wasm"
+name = "matroska-ebml"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
@@ -10,7 +10,7 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 gloo-net = "0.7.0"
 futures = "0.3"
-ebml-spec = { path = "../ebml-spec" }
+ebml-schema = { path = "../ebml-spec" }
 lru = "0.18.0"
 wasm-bindgen = "0.2.122"
 wasm-bindgen-futures = "0.4.72"

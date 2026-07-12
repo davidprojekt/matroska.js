@@ -1,7 +1,7 @@
-// Public entry point for mkv-player-ui.
+// Public entry point for @matroska-js/player.
 //
-//   import { createPlayer } from 'mkv-player-ui';
-//   import 'mkv-player-ui/style.css';
+//   import { createPlayer } from '@matroska-js/player';
+//   import '@matroska-js/player/style.css';
 //
 //   const player = createPlayer(document.querySelector('#player'), {
 //     controls: 'full',                 // 'full' | 'minimal' | 'none' | { preset, ...perControlBooleans, dock }

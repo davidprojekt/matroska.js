@@ -4,7 +4,7 @@
 import { createApp } from 'vue'
 import AdminSettings from './AdminSettings.vue'
 
-const el = document.getElementById('mkvplayer-admin-settings')
+const el = document.getElementById('matroskaplayer-admin-settings')
 if (el) {
 	createApp(AdminSettings).mount(el)
 }

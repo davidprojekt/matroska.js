@@ -1,11 +1,11 @@
 {
-  "name": "mkv-player-build",
+  "name": "matroska-remux-build",
   "version": "1.0.0",
-  "description": "Build helper for the MKV player/remuxer wasm package (AGPL-3.0).",
+  "description": "Build helper for the MKV remuxer wasm package @matroska-js/remux (AGPL-3.0).",
   "private": true,
   "scripts": {
-    "dev": "wasm-pack build --target web",
-    "build": "wasm-pack build --target web"
+    "dev": "wasm-pack build --target web && node scripts/fix-pkg-name.mjs",
+    "build": "wasm-pack build --target web && node scripts/fix-pkg-name.mjs"
   },
   "license": "AGPL-3.0-only"
 }

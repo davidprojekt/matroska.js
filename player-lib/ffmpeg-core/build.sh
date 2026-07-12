@@ -106,7 +106,7 @@ link libs: $FFMPEG_LINK_LIBS
 \`\`\`
 
 ## Rebuild
-The complete, scripted build is \`ffmpeg-core/\` in the mkv-player-ui sources
+The complete, scripted build is \`ffmpeg-core/\` in the @matroska-js/player sources
 (\`Dockerfile\`, \`build.sh\`, \`profiles/$profile.env\`). Run \`npm run build:ffmpeg\` to reproduce.
 EOF
 

@@ -1,5 +1,5 @@
-/* Styles for the mkv-player-ui control bar. Import once alongside the library:
- *   import 'mkv-player-ui/style.css';
+/* Styles for the @matroska-js/player control bar. Import once alongside the library:
+ *   import '@matroska-js/player/style.css';
  * The video.js skin's own CSS (@videojs/html/video/skin.css) is imported by the library JS;
  * this file only adds the app-agnostic tweaks the ejected markup needs plus the custom
  * dropdown-menu / chapter-marker styling. Layout of the player box itself (size, position,

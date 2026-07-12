@@ -3,7 +3,7 @@
 Plays Matroska `.mkv` / `.mka` files directly in Nextcloud's built-in **Viewer** — in-browser,
 offline, with no server-side transcoding. The player itself (WASM MKV→fMP4 remux + MSE + video.js
 controls, libass/PGS subtitles, optional ffmpeg.wasm audio transcoding, corner watermark) is the
-`mkv-player-ui` library (`../player-lib`); this app wraps it in a Viewer handler, bundles a
+`@matroska-js/player` library (`../player-lib`); this app wraps it in a Viewer handler, bundles a
 royalty-free ffmpeg.wasm core served from the instance, and adds admin settings.
 
 The app is **freemium**: free and fully functional, with a small corner watermark that an optional
@@ -13,7 +13,7 @@ paid license removes. See [Licensing & watermark](#licensing--watermark).
 
 ```sh
 npm install
-npm run deploy      # = build:app (Vite) + setup:ffmpeg (copy the core) + assemble (stage deploy/mkvplayer)
+npm run deploy      # = build:app (Vite) + setup:ffmpeg (copy the core) + assemble (stage deploy/matroskaplayer)
 ```
 
 `npm run build` additionally rebuilds the Rust `mkv-player` WASM first; use it when that changed.
@@ -21,7 +21,7 @@ npm run deploy      # = build:app (Vite) + setup:ffmpeg (copy the core) + assemb
 The Vite build uses `@nextcloud/vite-config` with two required overrides for this wasm/worker
 library (see `vite.config.js`): `nodePolyfills:false` and a relative `renderBuiltUrl` (so the
 jassub/ffmpeg workers don't reference `window.OC`, which doesn't exist in a Worker). It emits **two
-JS entries** — `mkvplayer-main` (the Viewer handler) and `mkvplayer-admin-settings` (the license
+JS entries** — `matroskaplayer-main` (the Viewer handler) and `matroskaplayer-admin-settings` (the license
 settings Vue app). Output lands in the app root — `js/` (entries), `dist/` (wasm), `assets/`
 (workers), `css/`.
 
@@ -37,7 +37,7 @@ bash dev/sync.sh              # copy the staged app in + enable it
 Re-run `npm run deploy && bash dev/sync.sh` after **any** change, then **hard-reload** the browser.
 Two gotchas that look like "my change didn't apply":
 
-- `dev/sync.sh` copies from `deploy/mkvplayer/`, which only `npm run assemble` (part of `deploy`)
+- `dev/sync.sh` copies from `deploy/matroskaplayer/`, which only `npm run assemble` (part of `deploy`)
   refreshes. Running `build:app` alone updates the app root but not `deploy/`, so always run the
   full `deploy` before syncing.
 - The app version is unchanged between builds, so Nextcloud's asset cache-buster (`?v=…`) stays the
@@ -111,7 +111,7 @@ a **Buy** link that opens the purchase page with this instance's id appended.
 Implemented in `lib/Service/LicenseService.php` (validation + buy URL), `lib/Settings/
 LicenseAdminSettings.php` + `src/AdminSettings.vue` (admin UI), and `lib/Controller/
 LicenseController.php` (`POST /settings/license`, admin-only). The watermark itself is a
-forced by `mkv-player-ui` unless it's told the session is licensed; `src/views/player-view.js`
+forced by `@matroska-js/player` unless it's told the session is licensed; `src/views/player-view.js`
 passes `embedderValidatedLicense` (a trusted vouch, not the key) only on licensed instances.
 
 **Before shipping, replace the placeholder public key** in `lib/Service/LicenseService.php`:
@@ -126,7 +126,7 @@ passes `embedderValidatedLicense` (a trusted vouch, not the key) only on license
 
 ```sh
 # instance id: occ config:system:get instanceid
-#   podman exec -u www-data mkvplayer-nc php occ config:system:get instanceid
+#   podman exec -u www-data matroskaplayer-nc php occ config:system:get instanceid
 MKV_LICENSE_SEED_HEX=<seed-from-dev/license-test-keys.txt> \
   php scripts/sign-license.php test@example.com <instanceid>
 ```

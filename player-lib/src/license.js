@@ -1,4 +1,4 @@
-// Offline license verification for mkv-player-ui.
+// Offline license verification for @matroska-js/player.
 //
 // A valid license removes the default "matroska.js" watermark and lets the caller show their own
 // (via the `watermark` option). Verification is fully offline and makes no network request: an

@@ -28,9 +28,9 @@ class LoadViewerListener implements IEventListener {
 
 	public function handle(Event $event): void {
 		// Load our entry after the Viewer's own scripts so window.OCA.Viewer exists when we
-		// register our handler. Util::addScript resolves `mkvplayer-main` to js/mkvplayer-main.mjs.
-		Util::addScript(Application::APP_ID, 'mkvplayer-main', 'viewer');
-		Util::addStyle(Application::APP_ID, 'mkvplayer-main');
+		// register our handler. Util::addScript resolves `matroskaplayer-main` to js/matroskaplayer-main.mjs.
+		Util::addScript(Application::APP_ID, 'matroskaplayer-main', 'viewer');
+		Util::addStyle(Application::APP_ID, 'matroskaplayer-main');
 
 		$this->initialState->provideInitialState('config', $this->config->getFrontendConfig());
 	}

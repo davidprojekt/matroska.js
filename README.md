@@ -47,10 +47,10 @@ This is a Cargo workspace + a small web frontend:
 | `ebml-spec`   | A proc-macro that ingests the official EBML/Matroska schema XML **at compile time**, so every element ID knows its name and type. (MIT) |
 | `ebml-wasm`   | The **EBML/Matroska parser core**: a forward-only **async iterator** over `EbmlElement`s plus the byte sources (`FetchSource`, `FsSource`, `MemSource`), exposed to JS via `wasm-bindgen` (`EbmlReader`, `FetchSourceEbml`). Container parsing only — no remuxing. (MIT) |
 | `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `audio_chunk()` (for transcoding), `cue_offset()`, `cue_times()`, `chapters()`, `font_attachments()`, and the subtitle accessors `subtitles()` (text→WebVTT), `subtitle_header()` / `subtitle_events()` (ASS), and `subtitle_bitmap_events()` (PGS→`.sup`). The fMP4 box writer lives in `fmp4.rs`, block/sample extraction and subtitle-block decompression in `remux.rs` / `track.rs`, the seek index in `index.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
-| `player-lib`  | **`mkv-player-ui`** — the **reusable player library** all frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), PGS subtitles via libpgs, and in-browser audio transcoding via a bundled royalty-free ffmpeg.wasm core. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable). (AGPL-3.0) |
-| `player-web`  | The **MKV player demo**: a URL box, local-file picker, and copy-shareable-link button around `mkv-player-ui`. (AGPL-3.0) |
-| `player-nextcloud`| A **[Nextcloud](https://nextcloud.com/) app** that plays `.mkv` / `.mka` files in the Files **Viewer** via `mkv-player-ui`. (AGPL-3.0) |
-| `matroska-web`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. (MIT) |
+| `player-lib`  | **`@matroska-js/player`** — the **reusable player library** all frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), PGS subtitles via libpgs, and in-browser audio transcoding via a bundled royalty-free ffmpeg.wasm core. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable). (AGPL-3.0) |
+| `player-web`  | The **MKV player demo**: a URL box, local-file picker, and copy-shareable-link button around `@matroska-js/player`. (AGPL-3.0) |
+| `player-nextcloud`| A **[Nextcloud](https://nextcloud.com/) app** that plays `.mkv` / `.mka` files in the Files **Viewer** via `@matroska-js/player`. (AGPL-3.0) |
+| `matroska-inspector`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. (MIT) |
 
 ## Supported codecs
 
@@ -109,7 +109,7 @@ npm install
 npm run dev          # open the printed Vite URL
 ```
 
-> The demo consumes the shared **`mkv-player-ui`** library in `player-lib/` (a
+> The demo consumes the shared **`@matroska-js/player`** library in `player-lib/` (a
 > workspace `file:` dependency), so run `npm install` in `player-lib` before it.
 > `npm run build` in `player-web` runs the `mkv-player` wasm build
 > for you, so step 1 is only needed for the dev server.
@@ -118,15 +118,15 @@ Put `.mkv` files under `ebml-wasm/example/` and point the URL box at them. Codec
 browser can't decode (e.g. HEVC in Firefox, AC-3 in Chrome/Firefox) are listed but
 flagged unsupported.
 
-### The EBML inspector (`matroska-web`)
+### The EBML inspector (`matroska-inspector`)
 
 ```sh
 # from ebml-wasm/: build the wasm module and copy it into the inspector
 cd ebml-wasm
-wasm-pack build --target web && cp -r ./pkg ../matroska-web/
+wasm-pack build --target web && cp -r ./pkg ../matroska-inspector/
 
 # then serve the frontend (any static server works)
-cd ../matroska-web
+cd ../matroska-inspector
 npx simple-http-server -i --cors --port 8501
 # open http://localhost:8501 and drop in an .mkv / .webm file
 ```
@@ -135,17 +135,17 @@ npx simple-http-server -i --cors --port 8501
 
 ```sh
 # Dumps init + first media segment per muxable track for ffprobe/mp4box to check.
-cargo run -p mkv-player --example dump_segments -- ebml-wasm/example/toaru.mkv /tmp/out
+cargo run -p matroska-remux --example dump_segments -- ebml-wasm/example/toaru.mkv /tmp/out
 ```
 
 ## License
 
 This repository is split by component:
 
-- **`ebml-spec`, `ebml-wasm`, and `matroska-web`** — the EBML/Matroska **parser core** and its
+- **`ebml-spec`, `ebml-wasm`, and `matroska-inspector`** — the EBML/Matroska **parser core** and its
   browser demo — are licensed under the **MIT License** (see [`ebml-wasm/LICENSE`](ebml-wasm/LICENSE)).
   Use them freely, including in closed-source projects.
-- **`mkv-player`** (the MKV→fMP4 remuxer/player), the **`mkv-player-ui`** library (`player-lib`),
+- **`mkv-player`** (the MKV→fMP4 remuxer/player), the **`@matroska-js/player`** library (`player-lib`),
   the **player demo** (`player-web`), and the **Nextcloud app** (`player-nextcloud`) are licensed
   under the **GNU Affero General Public License v3.0** (AGPL-3.0) — see
   [`LICENSE.txt`](LICENSE.txt). You're free to use,
@@ -155,6 +155,6 @@ This repository is split by component:
 ### Commercial licensing
 
 The AGPL components are also available under a **separate commercial license** — for embedding
-`mkv-player-ui` in a closed-source or SaaS product without the AGPL's source-disclosure
+`@matroska-js/player` in a closed-source or SaaS product without the AGPL's source-disclosure
 obligations, or for a watermark-free build. The author holds full copyright and can grant such
 terms. To arrange an agreement, contact **licensing@davidschneider.xyz**.

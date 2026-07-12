@@ -1,6 +1,6 @@
 // Copies our custom-built ffmpeg.wasm core (see ../ffmpeg-core/) into the consuming app's
 // public/ffmpeg/ so it is served same-origin — offline-first, no CDN. The core is LGPL, audio-only
-// and royalty-free (built by `npm run build:ffmpeg` in mkv-player-ui); its LICENSE + SOURCE.md are
+// and royalty-free (built by `npm run build:ffmpeg` in @matroska-js/player); its LICENSE + SOURCE.md are
 // copied alongside to satisfy the LGPL source-availability obligation.
 //
 // This is a SEPARATE, cached step from the app build: if the core hasn't been built yet, this
@@ -31,7 +31,7 @@ const srcDir = resolve(scriptDir, '..', 'ffmpeg-core', 'dist', profile);
 if (!existsSync(resolve(srcDir, 'ffmpeg-core.wasm'))) {
   console.warn(
     `[ffmpeg] no '${profile}' core at ${srcDir} — audio transcoding will be disabled.\n` +
-      '[ffmpeg] build it with:  (cd path/to/mkv-player-ui && npm run build:ffmpeg)'
+      '[ffmpeg] build it with:  (cd path/to/@matroska-js/player && npm run build:ffmpeg)'
   );
   // Remove any stale core so the app doesn't serve a mismatched/old one.
   rmSync(outDir, { recursive: true, force: true });

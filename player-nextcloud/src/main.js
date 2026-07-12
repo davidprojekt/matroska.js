@@ -9,7 +9,7 @@ import './player-view.css';
 installRangeFetchFix();
 
 const HANDLER = {
-	id: 'mkvplayer',
+	id: 'matroskaplayer',
 	// Matroska video (.mkv → video/x-matroska) and audio (.mka → audio/x-matroska). The Viewer's
 	// built-in video handler *aliases* video/x-matroska → video/webm to try native <video>
 	// playback; registering the mime directly here takes precedence so our WASM player handles it
@@ -28,12 +28,12 @@ function register() {
 	// Guard against double registration. The script can be injected by more than one load event
 	// (Files' LoadAdditionalScriptsEvent, LoadViewer, public-share render), so use a global flag
 	// that survives separate module evaluations, plus the Viewer's own handler list.
-	if (window.__mkvplayerRegistered || window.OCA.Viewer.availableHandlers?.some((h) => h.id === HANDLER.id)) {
-		window.__mkvplayerRegistered = true;
+	if (window.__matroskaplayerRegistered || window.OCA.Viewer.availableHandlers?.some((h) => h.id === HANDLER.id)) {
+		window.__matroskaplayerRegistered = true;
 		return true;
 	}
 	window.OCA.Viewer.registerHandler(HANDLER);
-	window.__mkvplayerRegistered = true;
+	window.__matroskaplayerRegistered = true;
 	return true;
 }
 

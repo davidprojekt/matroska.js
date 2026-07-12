@@ -8,7 +8,7 @@ use lru::LruCache;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::ReadableStreamDefaultReader;
-use ebml_wasm::ebml::{EbmlSource, Size};
+use matroska_ebml::ebml::{EbmlSource, Size};
 
 /// Cache/fetch granularity. Larger blocks mean far fewer HTTP round-trips when the
 /// EBML reader makes many small adjacent reads (vint headers, cluster headers).

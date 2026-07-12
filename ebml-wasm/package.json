@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "simple-http-server -i --cors --port 8501",
-    "dev": "wasm-pack build --target web && cp -r ./pkg ../matroska-web/",
+    "dev": "wasm-pack build --target web && cp -r ./pkg ../matroska-inspector/",
     "build": "wasm-pack build --target web"
   },
   "keywords": [],

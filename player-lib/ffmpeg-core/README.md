@@ -1,7 +1,7 @@
 # ffmpeg-core — custom ffmpeg.wasm build for the audio transcoder
 
 The player transcodes **audio** tracks the browser can't play natively in the remuxed fMP4 (video
-is always remuxed by the Rust `mkv-player` WASM — ffmpeg never touches video here). The stock
+is always remuxed by the Rust `@matroska-js/remux` WASM — ffmpeg never touches video here). The stock
 `@ffmpeg/core` on npm is built `--enable-gpl --enable-nonfree`, which is **non-redistributable** and
 carries patent-encumbered codecs, so it can't be shipped. This directory compiles our own core.
 

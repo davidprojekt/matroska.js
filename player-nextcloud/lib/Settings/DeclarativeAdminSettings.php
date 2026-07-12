@@ -24,7 +24,7 @@ class DeclarativeAdminSettings implements IDeclarativeSettingsForm {
 
 	public function getSchema(): array {
 		return [
-			'id' => 'mkvplayer_ffmpeg',
+			'id' => 'matroskaplayer_ffmpeg',
 			'priority' => 50,
 			'section_type' => DeclarativeSettingsTypes::SECTION_TYPE_ADMIN,
 			'section_id' => Application::APP_ID,

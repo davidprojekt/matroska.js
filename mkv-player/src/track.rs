@@ -2,8 +2,8 @@
 //! Matroska codec IDs to the MSE codec strings used with
 //! `MediaSource.isTypeSupported` / `SourceBuffer`.
 
-use ebml_wasm::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
-use ebml_wasm::matroska_data::{
+use matroska_ebml::ebml::{EbmlIterator, EbmlPayload, EbmlSource};
+use matroska_ebml::matroska_data::{
     ID_AUDIO, ID_BITDEPTH, ID_CHANNELS, ID_CODECDELAY, ID_CODECID, ID_CODECNAME, ID_CODECPRIVATE,
     ID_CONTENTCOMPALGO, ID_CONTENTCOMPRESSION, ID_CONTENTCOMPSETTINGS, ID_CONTENTENCODING,
     ID_CONTENTENCODINGS, ID_DEFAULTDURATION, ID_DISPLAYHEIGHT, ID_DISPLAYWIDTH, ID_FLAGDEFAULT,

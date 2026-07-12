@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Browser MKV player demo built on mkv-player-ui: URL box, file picker, shareable links.",
+  "description": "Browser MKV player demo built on @matroska-js/player: URL box, file picker, shareable links.",
   "scripts": {
     "dev": "vite",
     "build": "bash -c 'cd ../mkv-player && npm run build' && vite build",
@@ -12,7 +12,7 @@
     "deploy": "wrangler pages deploy ./dist/"
   },
   "dependencies": {
-    "mkv-player-ui": "file:../player-lib",
+    "@matroska-js/player": "file:../player-lib",
     "jassub": "^2.5.6"
   },
   "devDependencies": {

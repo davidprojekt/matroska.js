@@ -1,10 +1,18 @@
 {
-  "name": "mkv-player-ui",
-  "private": true,
+  "name": "@matroska-js/player",
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Reusable browser MKV player UI: WASM MKV→fMP4 remux + MSE + video.js v10, with configurable controls and a pluggable ffmpeg.wasm build.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/davidprojekt/matroska.js.git",
+    "directory": "player-lib"
+  },
+  "homepage": "https://github.com/davidprojekt/matroska.js#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": "./src/index.js",
     "./style.css": "./src/style.css"
@@ -12,7 +20,8 @@
   "files": [
     "src",
     "scripts",
-    "ffmpeg-core"
+    "ffmpeg-core",
+    "README.md"
   ],
   "scripts": {
     "build:ffmpeg": "bash ffmpeg-core/build.sh",
@@ -21,7 +30,7 @@
   },
   "dependencies": {
     "@videojs/html": "^10.0.0-beta.24",
-    "mkv-player": "file:../mkv-player/pkg",
+    "@matroska-js/remux": "file:../mkv-player/pkg",
     "jassub": "^2.5.6",
     "libpgs": "^0.8.1"
   },

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use ebml_spec::{parse_xml, create_consts};
+use ebml_schema::{parse_xml, create_consts};
 
 // create_consts!("../specs/ebml_matroska.xml");
 // The macro works, but my IDE doesn't get it, so I just copy pasted the result into here

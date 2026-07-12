@@ -5,11 +5,11 @@
 //! `FsSource`; [`MatroskaPlayer`] is the `wasm-bindgen` facade over
 //! `Demuxer<FetchSource>`.
 
-use ebml_wasm::ebml::{Ebml, EbmlIterator, EbmlPayload, EbmlSource};
+use matroska_ebml::ebml::{Ebml, EbmlIterator, EbmlPayload, EbmlSource};
 use crate::fmp4::{build_init_segment, build_media_segment, CodecConfig, MediaKind, TrackConfig};
-use ebml_wasm::mem_source::MemSource;
+use matroska_ebml::mem_source::MemSource;
 use crate::index::{cue_cluster_for_time, parse_cues, parse_seek_head, CuePoint};
-use ebml_wasm::matroska_data::{
+use matroska_ebml::matroska_data::{
     ID_ATTACHEDFILE, ID_ATTACHMENTS, ID_BLOCK, ID_BLOCKDURATION, ID_BLOCKGROUP, ID_CHAPLANGUAGE,
     ID_CHAPLANGUAGEBCP47, ID_CHAPSTRING, ID_CHAPTERATOM, ID_CHAPTERDISPLAY, ID_CHAPTERFLAGHIDDEN,
     ID_CHAPTERS, ID_CHAPTERTIMEEND, ID_CHAPTERTIMESTART, ID_CHAPTERUID, ID_CLUSTER, ID_CUES,
@@ -1229,7 +1229,7 @@ fn build_sup_fragment(pts_ms: u64, payload: &[u8]) -> Vec<u8> {
 mod wasm {
     use super::*;
     use crate::stream_source::StreamSource;
-    use ebml_wasm::matroska_data::element_id_type_map;
+    use matroska_ebml::matroska_data::element_id_type_map;
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]

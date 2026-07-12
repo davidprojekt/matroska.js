@@ -1,6 +1,6 @@
 /* Layout for the Viewer handler component (the player library's own styling loads lazily with
    it). These few rules are small enough to ship in the always-injected entry stylesheet. */
-.mkvplayer-outer {
+.matroskaplayer-outer {
 	position: relative;
 	width: 100%;
 	height: calc(100% - 2rem);
@@ -8,14 +8,14 @@
 	padding: 2rem 3rem 0;
 }
 
-.mkvplayer-stage,
-.mkvplayer-stage video-player,
-.mkvplayer-stage video {
+.matroskaplayer-stage,
+.matroskaplayer-stage video-player,
+.matroskaplayer-stage video {
 	width: 100%;
 	height: 100%;
 }
 
-.mkvplayer-status {
+.matroskaplayer-status {
 	position: absolute;
 	inset: 0;
 	display: grid;

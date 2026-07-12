@@ -6,7 +6,7 @@ pub mod mem_source;
 
 use wasm_bindgen::prelude::*;
 use std::collections::HashMap;
-use ebml_spec::parse_xml;
+use ebml_schema::parse_xml;
 use crate::ebml::{Ebml, EbmlElement, EbmlIterator, EbmlPayload, EbmlSource, Size};
 use crate::matroska_data::element_id_type_map;
 use crate::fetch_source::FetchSource;

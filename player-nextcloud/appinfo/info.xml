@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
-    <id>mkvplayer</id>
+    <id>matroskaplayer</id>
     <name>MKV Player</name>
     <summary>Play Matroska (.mkv) video in the Viewer — in-browser, offline, no server transcoding.</summary>
     <description><![CDATA[

@@ -39,22 +39,22 @@ await page.waitForLoadState('networkidle', { timeout: 30000 })
 
 await page.goto(`${BASE}/apps/files/`, { waitUntil: 'networkidle', timeout: 30000 })
 await page.waitForFunction(() => !!(window.OCA?.Viewer?.open), { timeout: 20000 })
-const handlerRegistered = await page.evaluate(() => (window.OCA.Viewer.availableHandlers || []).some((h) => h.id === 'mkvplayer'))
+const handlerRegistered = await page.evaluate(() => (window.OCA.Viewer.availableHandlers || []).some((h) => h.id === 'matroskaplayer'))
 
 await page.evaluate((p) => window.OCA.Viewer.open({ path: p }), PATH)
 
 let mounted = false
-try { await page.waitForSelector('.mkvplayer-stage', { timeout: 15000 }); mounted = true } catch { /**/ }
+try { await page.waitForSelector('.matroskaplayer-stage', { timeout: 15000 }); mounted = true } catch { /**/ }
 await page.waitForTimeout(WAIT)
 
 const handed = await page.evaluate(() => window.__mkv || null)
 const state = await page.evaluate(() => {
-	const v = document.querySelector('.mkvplayer-stage video')
+	const v = document.querySelector('.matroskaplayer-stage video')
 	return {
-		hasStage: !!document.querySelector('.mkvplayer-stage'),
+		hasStage: !!document.querySelector('.matroskaplayer-stage'),
 		hasVideoEl: !!v,
 		video: v ? { readyState: v.readyState, currentTime: +v.currentTime.toFixed(2), duration: v.duration, w: v.videoWidth, err: v.error?.code ?? null } : null,
-		status: document.querySelector('.mkvplayer-status')?.textContent?.trim() || null,
+		status: document.querySelector('.matroskaplayer-status')?.textContent?.trim() || null,
 	}
 })
 

@@ -10,7 +10,7 @@ import '@videojs/html/video/skin.css';
 // needs the element defined and the default icon set registered.
 import '@videojs/html/icons/element/default';
 
-import initWasm, { MatroskaPlayer } from 'mkv-player';
+import initWasm, { MatroskaPlayer } from '@matroska-js/remux';
 import { MseController } from './mse.js';
 import {
   SubtitleTrack,

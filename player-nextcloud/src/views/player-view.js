@@ -12,7 +12,7 @@ import { generateFilePath } from '@nextcloud/router'
 /** Read the app config seeded via initial state (transcode/debug/external flags). */
 function loadConfig() {
 	try {
-		return loadState('mkvplayer', 'config') || {}
+		return loadState('matroskaplayer', 'config') || {}
 	} catch (e) {
 		return {}
 	}
@@ -27,8 +27,8 @@ function resolveFfmpeg(config) {
 		return config.external
 	}
 	return {
-		coreURL: generateFilePath('mkvplayer', '', 'ffmpeg/ffmpeg-core.js'),
-		wasmURL: generateFilePath('mkvplayer', '', 'ffmpeg/ffmpeg-core.wasm'),
+		coreURL: generateFilePath('matroskaplayer', '', 'ffmpeg/ffmpeg-core.js'),
+		wasmURL: generateFilePath('matroskaplayer', '', 'ffmpeg/ffmpeg-core.wasm'),
 	}
 }
 
@@ -45,12 +45,12 @@ export default {
 	},
 
 	render(h) {
-		const children = [h('div', { ref: 'stage', class: 'mkvplayer-stage' })]
+		const children = [h('div', { ref: 'stage', class: 'matroskaplayer-stage' })]
 		// The status/loading/error overlay is only rendered when the admin enabled debugging.
 		if (this.config.debug && this.statusMessage) {
-			children.push(h('div', { class: 'mkvplayer-status' }, this.statusMessage))
+			children.push(h('div', { class: 'matroskaplayer-status' }, this.statusMessage))
 		}
-		return h('div', { class: 'mkvplayer-outer' }, children)
+		return h('div', { class: 'matroskaplayer-outer' }, children)
 	},
 
 	mounted() {
@@ -85,8 +85,8 @@ export default {
 			try {
 				// Lazy chunk: pulls in the remuxer WASM + workers only when a file is opened.
 				const [{ createPlayer }] = await Promise.all([
-					import('mkv-player-ui'),
-					import('mkv-player-ui/style.css'),
+					import('@matroska-js/player'),
+					import('@matroska-js/player/style.css'),
 				])
 				if (this._teardown) {
 					return

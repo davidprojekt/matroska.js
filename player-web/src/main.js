@@ -1,8 +1,8 @@
 // The full MKV player demo: a URL box, a local-file picker, and a copy-shareable-link
-// button around the mkv-player-ui player. The playback engine (remux, MSE, controls,
+// button around the @matroska-js/player player. The playback engine (remux, MSE, controls,
 // subtitles, transcoding) all lives in the library; this shell is just the page chrome.
-import { createPlayer } from 'mkv-player-ui';
-import 'mkv-player-ui/style.css';
+import { createPlayer } from '@matroska-js/player';
+import '@matroska-js/player/style.css';
 
 const statusEl = document.getElementById('status');
 const urlInput = document.getElementById('url');

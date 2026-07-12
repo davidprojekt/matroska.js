@@ -1,5 +1,5 @@
 [package]
-name = "mkv-player"
+name = "matroska-remux"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ebml-wasm = { path = "../ebml-wasm" }
+matroska-ebml = { path = "../ebml-wasm" }
 gloo-net = "0.7.0"
 futures = "0.3"
 js-sys = "0.3.99"

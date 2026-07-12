@@ -6,7 +6,7 @@
   @nextcloud/vue dependency) plus a little scoped CSS.
 -->
 <template>
-	<div id="mkvplayer-license" class="section">
+	<div id="matroskaplayer-license" class="section">
 		<h2>{{ 'MKV Player license' }}</h2>
 		<p class="settings-hint">
 			A valid license removes the player watermark. Validation runs entirely offline and
@@ -14,9 +14,9 @@
 			and it is never sent to viewers.
 		</p>
 
-		<div class="mkvplayer-license__field">
+		<div class="matroskaplayer-license__field">
 			<input
-				id="mkvplayer-license-key"
+				id="matroskaplayer-license-key"
 				v-model="key"
 				type="password"
 				autocomplete="off"
@@ -31,11 +31,11 @@
 			</button>
 		</div>
 
-		<p v-if="statusText" class="mkvplayer-license__status" :class="valid ? 'is-valid' : 'is-invalid'">
+		<p v-if="statusText" class="matroskaplayer-license__status" :class="valid ? 'is-valid' : 'is-invalid'">
 			{{ statusText }}
 		</p>
 
-		<p class="mkvplayer-license__buy">
+		<p class="matroskaplayer-license__buy">
 			<a class="button" :href="buyUrl" target="_blank" rel="noopener noreferrer">
 				Buy a license
 			</a>
@@ -50,7 +50,7 @@ import { generateUrl } from '@nextcloud/router'
 /** Read the admin-only license state seeded by LicenseAdminSettings (never the raw key). */
 function loadLicenseState() {
 	try {
-		return loadState('mkvplayer', 'license') || {}
+		return loadState('matroskaplayer', 'license') || {}
 	} catch (e) {
 		return {}
 	}
@@ -97,7 +97,7 @@ export default {
 			}
 			this.saving = true
 			try {
-				const resp = await fetch(generateUrl('/apps/mkvplayer/settings/license'), {
+				const resp = await fetch(generateUrl('/apps/matroskaplayer/settings/license'), {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -122,7 +122,7 @@ export default {
 </script>
 
 <style scoped>
-.mkvplayer-license__field {
+.matroskaplayer-license__field {
 	display: flex;
 	gap: 0.75rem;
 	align-items: center;
@@ -130,31 +130,31 @@ export default {
 	max-width: 40rem;
 	margin-top: 0.75rem;
 }
-.mkvplayer-license__field input[type='password'] {
+.matroskaplayer-license__field input[type='password'] {
 	flex: 1 1 24rem;
 	min-width: 18rem;
 	height: 44px;
 	box-sizing: border-box;
 	padding: 0 0.75rem;
 }
-.mkvplayer-license__field button {
+.matroskaplayer-license__field button {
 	flex: none;
 	height: 44px;
 }
-.mkvplayer-license__status {
+.matroskaplayer-license__status {
 	font-weight: 600;
 	margin-top: 0.5rem;
 }
-.mkvplayer-license__status.is-valid {
+.matroskaplayer-license__status.is-valid {
 	color: var(--color-success, #2d7b41);
 }
-.mkvplayer-license__status.is-invalid {
+.matroskaplayer-license__status.is-invalid {
 	color: var(--color-error, #c9302c);
 }
-.mkvplayer-license__buy .button {
+.matroskaplayer-license__buy .button {
 	display: inline-block;
 }
-#mkvplayer-license-key {
+#matroskaplayer-license-key {
   width: min(max(25rem, 30%), 100%);
 }
 </style>

@@ -1,10 +1,10 @@
 {
-  "name": "mkvplayer-nextcloud",
+  "name": "matroskaplayer-nextcloud",
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Nextcloud app that plays .mkv/.mka files in the Viewer via mkv-player-ui.",
+  "description": "Nextcloud app that plays .mkv/.mka files in the Viewer via @matroska-js/player.",
   "scripts": {
     "dev": "vite --mode development build --watch",
     "clean": "rm -rf js css dist assets",
@@ -15,7 +15,7 @@
     "deploy": "npm run build:app && npm run setup:ffmpeg && npm run assemble"
   },
   "dependencies": {
-    "mkv-player-ui": "file:../player-lib"
+    "@matroska-js/player": "file:../player-lib"
   },
   "devDependencies": {
     "@nextcloud/initial-state": "^3.0.0",

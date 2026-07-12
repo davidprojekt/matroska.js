@@ -1,6 +1,6 @@
 # Local Nextcloud dev instance for the MKV Player app.
 #
-#   npm run deploy                # build + stage the app into deploy/mkvplayer/
+#   npm run deploy                # build + stage the app into deploy/matroskaplayer/
 #   podman-compose up -d          # start Nextcloud (auto-installs on first run, ~30s)
 #   bash dev/sync.sh              # copy the staged app in + enable it (re-run after changes)
 #   # open http://localhost:8080  (login: admin / admin)
@@ -15,7 +15,7 @@
 services:
   nextcloud:
     image: docker.io/library/nextcloud:34-apache
-    container_name: mkvplayer-nc
+    container_name: matroskaplayer-nc
     ports:
       - "8080:80"
     environment:
@@ -26,7 +26,7 @@ services:
     volumes:
       - nextcloud_html:/var/www/html
       # Dev-only PHP override so opcache picks up synced app-code changes immediately.
-      - ./dev/php-dev.ini:/usr/local/etc/php/conf.d/zz-mkvplayer-dev.ini:ro
+      - ./dev/php-dev.ini:/usr/local/etc/php/conf.d/zz-matroskaplayer-dev.ini:ro
 
 volumes:
   nextcloud_html:

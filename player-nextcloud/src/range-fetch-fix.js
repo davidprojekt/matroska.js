@@ -1,6 +1,6 @@
 // Workaround for a Nextcloud fetch wrapper that breaks the player's byte-range reads.
 //
-// The mkv-player WASM issues range reads as `fetch(new Request(url, { headers: { Range } }))`.
+// The @matroska-js/remux WASM issues range reads as `fetch(new Request(url, { headers: { Range } }))`.
 // Nextcloud replaces `window.fetch` with a wrapper that augments requests by building an `init`
 // object and re-invoking the inner fetch as `fetch(request, init)`. Per the Fetch spec, when
 // both a Request and an `init.headers` are supplied, the init headers replace the Request's — and
@@ -19,7 +19,7 @@
 // fresh same-realm `Response` over the buffered bytes (each request the WASM makes is bounded — a
 // small range or one forward SEGMENT — so buffering it is fine).
 //
-// TODO(upstream): ideally the mkv-player fetch layer would pass Range via `fetch(url, { headers })`
+// TODO(upstream): ideally the @matroska-js/remux fetch layer would pass Range via `fetch(url, { headers })`
 // (which NC's wrapper preserves); this shim lets the Nextcloud app work with the library as-is.
 let pristineFetch
 

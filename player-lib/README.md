@@ -1,7 +1,7 @@
-# mkv-player-ui
+# @matroska-js/player
 
 The reusable browser MKV player extracted from `player-web`. It parses
-`.mkv`/`.webm` with the `mkv-player` WASM remuxer, remuxes to fragmented MP4 on the fly,
+`.mkv`/`.webm` with the `@matroska-js/remux` WASM remuxer, remuxes to fragmented MP4 on the fly,
 and plays it through Media Source Extensions behind a [video.js v10](https://www.npmjs.com/package/@videojs/html)
 control bar. Unsupported audio codecs are transcoded in-browser with ffmpeg.wasm; ASS/SSA
 subtitles render via libass (JASSUB).
@@ -9,8 +9,8 @@ subtitles render via libass (JASSUB).
 ## Usage
 
 ```js
-import { createPlayer } from 'mkv-player-ui';
-import 'mkv-player-ui/style.css';
+import { createPlayer } from '@matroska-js/player';
+import '@matroska-js/player/style.css';
 
 const player = createPlayer(document.querySelector('#player'), {
   controls: 'full',                       // 'full' | 'minimal' | 'none' | { preset, ...overrides }
@@ -58,7 +58,7 @@ controls: { preset: 'full', dock: 'below' }
 ### ffmpeg core (audio transcoding)
 
 ffmpeg.wasm is used only to transcode **audio** tracks the browser can't decode natively in the
-remuxed fMP4 (video is always remuxed by the `mkv-player` WASM — ffmpeg never touches video). The
+remuxed fMP4 (video is always remuxed by the `@matroska-js/remux` WASM — ffmpeg never touches video). The
 transcoder outputs **AAC-LC** (preferred — encodes reliably, universal MSE incl. Safari) or **Opus**
 (fallback) — both royalty-free (AAC-LC's core patents have expired). Never a GPL/patent video codec.
 
@@ -93,13 +93,13 @@ supported (e.g. Safari).
 ## Required consumer Vite config
 
 The library is shipped as ESM **source** — the consuming app's bundler builds it as part of
-its own graph. Because `mkv-player`, `jassub`, and `@ffmpeg/ffmpeg` resolve their `.wasm` and
+its own graph. Because `@matroska-js/remux`, `jassub`, and `@ffmpeg/ffmpeg` resolve their `.wasm` and
 workers via `new URL(…, import.meta.url)` / module workers, the consuming app's `vite.config.js`
 **must** keep:
 
 ```js
 optimizeDeps: {
-  exclude: ['mkv-player', 'jassub', '@ffmpeg/ffmpeg', '@ffmpeg/util'],
+  exclude: ['@matroska-js/remux', 'jassub', '@ffmpeg/ffmpeg', '@ffmpeg/util'],
   include: ['throughput', 'rvfc-polyfill'],
 },
 worker: { format: 'es' },
@@ -111,7 +111,7 @@ Because `optimizeDeps.include` resolves from the app root, the app must also dec
 npm hoists jassub's CJS deps (`throughput`, `rvfc-polyfill`) where esbuild can find them.
 
 To fully drop ffmpeg from a build (in addition to `transcode: false`), alias `@ffmpeg/ffmpeg`
-and `@ffmpeg/util` to `mkv-player-ui/src/ffmpeg-stub.js` and define `__TRANSCODE__` as
+and `@ffmpeg/util` to `@matroska-js/player/src/ffmpeg-stub.js` and define `__TRANSCODE__` as
 `false` in your bundler config (a `resolve.alias` plus the `define`).
 
 ## Test

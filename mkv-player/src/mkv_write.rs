@@ -3,7 +3,7 @@
 //! Just enough to emit a self-contained, single-audio-track Matroska chunk
 //! (EBML header + Segment{ Info + Tracks + Cluster(s) }) for one time window. The
 //! chunk is handed to ffmpeg.wasm in the browser to transcode audio codecs that
-//! MSE can't decode natively (DTS, TrueHD, Vorbis, PCM, …). `ebml-wasm` is a
+//! MSE can't decode natively (DTS, TrueHD, Vorbis, PCM, …). `matroska-ebml` is a
 //! parser only, so the encoder lives here.
 //!
 //! The chunk's timeline is **zero-anchored** at its first frame: ffmpeg's MP4
@@ -14,7 +14,7 @@
 //! frame so per-block relative timecodes stay within the MKV `i16` range.
 
 use crate::remux::TimedFrame;
-use ebml_wasm::matroska_data::{
+use matroska_ebml::matroska_data::{
     ID_AUDIO, ID_BITDEPTH, ID_CHANNELS, ID_CLUSTER, ID_CODECDELAY, ID_CODECID, ID_CODECPRIVATE,
     ID_DOCTYPE, ID_DOCTYPE_READ_VERSION, ID_DOCTYPE_VERSION, ID_EBML, ID_EBMLMAX_IDLENGTH,
     ID_EBMLMAX_SIZE_LENGTH, ID_EBMLREAD_VERSION, ID_EBMLVERSION, ID_FLAGLACING, ID_INFO,
@@ -148,8 +148,8 @@ pub fn build_audio_chunk(p: &AudioChunkParams, frames: &[TimedFrame]) -> Vec<u8>
     // Info
     let mut info = Vec::new();
     elem_uint(&mut info, ID_TIMESTAMPSCALE, p.timestamp_scale_ns.max(1));
-    elem_string(&mut info, ID_MUXINGAPP, "mkv-player");
-    elem_string(&mut info, ID_WRITINGAPP, "mkv-player");
+    elem_string(&mut info, ID_MUXINGAPP, "matroska-remux");
+    elem_string(&mut info, ID_WRITINGAPP, "matroska-remux");
     elem(&mut seg, ID_INFO, &info);
 
     // Tracks → one audio TrackEntry

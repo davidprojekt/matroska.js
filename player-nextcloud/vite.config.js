@@ -2,7 +2,7 @@ import { createAppConfig } from '@nextcloud/vite-config';
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 
-// The mkv-player-ui library ships as ESM *source* that this app's bundler must compile. It
+// The @matroska-js/player library ships as ESM *source* that this app's bundler must compile. It
 // relies on three things the consumer build has to preserve: its wasm/worker
 // `new URL(…, import.meta.url)` references, ES-module
 // workers, and a couple of force-bundled CJS deps. We inject those via createAppConfig's
@@ -18,7 +18,7 @@ const overrides = defineConfig({
   optimizeDeps: {
     // Keep these out of esbuild pre-bundling so their `new URL(import.meta.url)` wasm/worker
     // references survive and Vite emits the assets itself.
-    exclude: ['mkv-player', 'jassub', '@ffmpeg/ffmpeg', '@ffmpeg/util'],
+    exclude: ['@matroska-js/remux', 'jassub', '@ffmpeg/ffmpeg', '@ffmpeg/util'],
     // jassub's CJS deps would otherwise be served raw and fail as ESM default-imports.
     include: ['throughput', 'rvfc-polyfill'],
   },
@@ -26,7 +26,7 @@ const overrides = defineConfig({
     __TRANSCODE__: 'true',
   },
   server: {
-    // Allow importing the workspace packages (mkv-player-ui, mkv-player pkg) that live one dir up.
+    // Allow importing the workspace packages (@matroska-js/player, @matroska-js/remux pkg) that live one dir up.
     fs: { allow: ['..'] },
   },
   experimental: {
@@ -46,14 +46,14 @@ export default createAppConfig(
   {
     main: fileURLToPath(new URL('src/main.js', import.meta.url)),
     // Standalone Vue 3 app for the admin settings page (license key + buy link). Emitted as
-    // js/mkvplayer-admin-settings.mjs. It only loads on the admin settings page, isolated from
+    // js/matroskaplayer-admin-settings.mjs. It only loads on the admin settings page, isolated from
     // the Vue-2 Viewer handler in `main`, so bundling a Vue 3 runtime here causes no conflict.
     'admin-settings': fileURLToPath(new URL('src/admin-settings.js', import.meta.url)),
   },
   {
     config: overrides,
     // Disable @nextcloud/vite-config's default vite-plugin-node-polyfills. It rewrites the
-    // mkv-player wasm-pack glue (which lives outside this app dir) to import a `global` shim
+    // @matroska-js/remux wasm-pack glue (which lives outside this app dir) to import a `global` shim
     // that then can't be resolved, breaking the build. The library builds with plain Vite
     // and no polyfills, so the glue doesn't need them at runtime.
     nodePolyfills: false,
