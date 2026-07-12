@@ -49,7 +49,7 @@ This is a Cargo workspace + a small web frontend:
 | `mkv-player`  | The **MKV→fMP4 remuxer and player**, built on `ebml-wasm` and exposed to JS via `wasm-bindgen`. `MatroskaPlayer` (in `player.rs`) exposes `open(url)`, `tracks()`, `init_segment()`, `media_segment()`, `audio_chunk()` (for transcoding), `cue_offset()`, `cue_times()`, `chapters()`, `font_attachments()`, and the subtitle accessors `subtitles()` (text→WebVTT), `subtitle_header()` / `subtitle_events()` (ASS), and `subtitle_bitmap_events()` (PGS→`.sup`). The fMP4 box writer lives in `fmp4.rs`, block/sample extraction and subtitle-block decompression in `remux.rs` / `track.rs`, the seek index in `index.rs`, and the streaming byte source in `stream_source.rs`. (AGPL-3.0) |
 | `player-lib`  | **`@matroska-js/player`** — the **reusable player library** all frontends are built on: [video.js v10](https://www.npmjs.com/package/@videojs/html) (`@videojs/html`) UI driving MSE from the `mkv-player` WASM remuxer, ASS/SSA subtitles via libass (JASSUB), PGS subtitles via libpgs, and in-browser audio transcoding via a bundled royalty-free ffmpeg.wasm core. `createPlayer(container, opts)` builds the control bar (controls are configurable/removable). (AGPL-3.0) |
 | `player-web`  | The **MKV player demo**: a URL box, local-file picker, and copy-shareable-link button around `@matroska-js/player`. (AGPL-3.0) |
-| `player-nextcloud`| A **[Nextcloud](https://nextcloud.com/) app** that plays `.mkv` / `.mka` files in the Files **Viewer** via `@matroska-js/player`. (AGPL-3.0) |
+| **[matroska-player-nextcloud](https://github.com/davidprojekt/matroska-player-nextcloud)** ↗ | A **[Nextcloud](https://nextcloud.com/) app** that plays `.mkv` / `.mka` files in the Files **Viewer** via `@matroska-js/player`. Lives in its **own repository** (built on the published npm package). (AGPL-3.0) |
 | `matroska-inspector`| A browser demo UI: drop a local video file and explore its EBML structure as a tree with a hex inspector, plus a quick metadata summary (tracks, languages, resolution, duration). Uses only the `ebml-wasm` parser. (MIT) |
 
 ## Supported codecs
@@ -146,7 +146,8 @@ This repository is split by component:
   browser demo — are licensed under the **MIT License** (see [`ebml-wasm/LICENSE`](ebml-wasm/LICENSE)).
   Use them freely, including in closed-source projects.
 - **`mkv-player`** (the MKV→fMP4 remuxer/player), the **`@matroska-js/player`** library (`player-lib`),
-  the **player demo** (`player-web`), and the **Nextcloud app** (`player-nextcloud`) are licensed
+  the **player demo** (`player-web`), and the **Nextcloud app**
+  ([matroska-player-nextcloud](https://github.com/davidprojekt/matroska-player-nextcloud), separate repo) are licensed
   under the **GNU Affero General Public License v3.0** (AGPL-3.0) — see
   [`LICENSE.txt`](LICENSE.txt). You're free to use,
   study, modify, and share them, but if you distribute them **or run a modified
