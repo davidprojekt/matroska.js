@@ -2,11 +2,18 @@
 // crate name (`matroska-remux`). Rewrite it to the published npm identity `@matroska-js/remux`
 // and attach publish metadata. Run as a build post-step — never hand-edit pkg/package.json, it
 // is a build artifact that this script owns.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const pkgPath = fileURLToPath(new URL('../pkg/package.json', import.meta.url));
 const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+
+// wasm-pack does not copy the crate README into pkg/; do it here so the npm page has one.
+await copyFile(
+  fileURLToPath(new URL('../README.md', import.meta.url)),
+  fileURLToPath(new URL('../pkg/README.md', import.meta.url)),
+);
+if (!pkg.files?.includes('README.md')) pkg.files = [...(pkg.files ?? []), 'README.md'];
 
 pkg.name = '@matroska-js/remux';
 pkg.description =
