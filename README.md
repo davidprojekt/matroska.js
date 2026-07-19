@@ -155,7 +155,6 @@ This repository is split by component:
 
 ### Commercial licensing
 
-The AGPL components are also available under a **separate commercial license** — for embedding
-`@matroska-js/player` in a closed-source or SaaS product without the AGPL's source-disclosure
-obligations, or for a watermark-free build. The author holds full copyright and can grant such
-terms. To arrange an agreement, contact **licensing@davidschneider.xyz**.
+The AGPL components may also be offered under a separate commercial license for organizations that require terms different from the AGPL-3.0-only license — including use of @matroska-js/player in closed-source or SaaS products without the AGPL's source-disclosure obligations, or for watermark-free builds.
+
+The author holds the necessary copyright and is preparing commercial licensing options. To discuss future licensing arrangements, contact [licensing@davidschneider.xyz](mailto:licensing@davidschneider.xyz).
